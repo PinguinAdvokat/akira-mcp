@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package akira.command.v1;
+
+option go_package = "github.com/PinguinAdvokat/akira-mcp/pkg/api/commandpb/v1;commandpb";
+
+import "google/protobuf/timestamp.proto";
+
+// CommandService — долгоживущее stream-соединение: клиент подключается
+// и держит поток открытым, сервер отправляет команды для исполнения,
+// клиент возвращает результаты по тому же потоку.
+service CommandService {
+  // Connect открывает двунаправленный поток. Первым сообщением клиент
+  // обязан отправить RegisterRequest.
+  rpc Connect(stream ClientMessage) returns (stream ServerMessage);
+}
+
+// ClientMessage — конверт для всех сообщений клиента.
+message ClientMessage {
+  oneof payload {
+    RegisterRequest register = 1;
+    CommandResult result = 2;
+    Ping ping = 3;
+  }
+}
+
+// ServerMessage — конверт для всех сообщений сервера.
+message ServerMessage {
+  oneof payload {
+    RegisterResponse register_ack = 1;
+    Command command = 2;
+    Pong pong = 3;
+  }
+}
+
+// RegisterRequest — первое сообщение при подключении.
+message RegisterRequest {
+  // client_id — уникальный идентификатор клиента (uuid). Обязателен.
+  string client_id = 1;
+  string hostname = 2;
+  // platform — целевая ОС: linux / darwin / windows.
+  string platform = 3;
+}
+
+// RegisterResponse — подтверждение регистрации.
+message RegisterResponse {
+  string session_id = 1;
+  // heartbeat_interval_ms — период отправки Ping клиентом.
+  int64 heartbeat_interval_ms = 2;
+}
+
+message Ping {
+  int64 seq = 1;
+}
+
+message Pong {
+  int64 seq = 1;
+}
+
+// Command — команда для исполнения клиентом. Поле id обязательно:
+// клиент возвращает его в CommandResult.command_id.
+message Command {
+  string id = 1;
+  oneof payload {
+    ExecCommand exec = 2;
+    ReadFileRequest read_file = 3;
+    WriteFileRequest write_file = 4;
+  }
+  google.protobuf.Timestamp created_at = 5;
+  // timeout_ms — лимит исполнения; 0 означает без таймаута.
+  int64 timeout_ms = 6;
+}
+
+// ExecCommand — запуск процесса.
+message ExecCommand {
+    string cmd = 1;
+}
+
+// ReadFileRequest — прочитать файл и вернуть содержимое.
+message ReadFileRequest {
+  string path = 1;
+  // max_bytes — ограничение размера ответа; 0 = без ограничения.
+  int64 max_bytes = 2;
+}
+
+// WriteFileRequest — записать файл.
+message WriteFileRequest {
+  string path = 1;
+  bytes content = 2;
+  bool create_dirs = 3;
+}
+
+// CommandResult — результат исполнения команды.
+message CommandResult {
+  string command_id = 1;
+  Status status = 2;
+  // exit_code — валиден только для ExecCommand.
+  int32 exit_code = 3;
+  // stdout — валиден для ExecCommand и ReadFileRequest.
+  bytes stdout = 4;
+  // stderr — валиден только для ExecCommand.
+  bytes stderr = 5;
+  // error — текст ошибки при status = STATUS_ERROR.
+  string error = 6;
+  // duration_ms — фактическое время исполнения.
+  int64 duration_ms = 7;
+
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_OK = 1;
+    STATUS_ERROR = 2;
+    STATUS_TIMEOUT = 3;
+    STATUS_REJECTED = 4;
+  }
+}

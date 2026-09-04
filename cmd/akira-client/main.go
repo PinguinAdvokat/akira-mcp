@@ -8,17 +8,9 @@ import (
 	"time"
 
 	db "github.com/PinguinAdvokat/akira-mcp/pkg/api"
-	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
-
-func init() {
-	// loads values from .env into the system
-	if err := godotenv.Load(); err != nil {
-		log.Print("No .env file found")
-	}
-}
 
 func main() {
 	// Get the GITHUB_USERNAME environment variable
