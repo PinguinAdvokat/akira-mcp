@@ -2,9 +2,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.34.1
-// source: command/v1/command.proto
+// source: connection/v1/connection.proto
 
-package commandpb
+package connectionpb
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -22,26 +22,26 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type CommandResult_Status int32
+type ConnectionResult_Status int32
 
 const (
-	CommandResult_STATUS_UNSPECIFIED CommandResult_Status = 0
-	CommandResult_STATUS_OK          CommandResult_Status = 1
-	CommandResult_STATUS_ERROR       CommandResult_Status = 2
-	CommandResult_STATUS_TIMEOUT     CommandResult_Status = 3
-	CommandResult_STATUS_REJECTED    CommandResult_Status = 4
+	ConnectionResult_STATUS_UNSPECIFIED ConnectionResult_Status = 0
+	ConnectionResult_STATUS_OK          ConnectionResult_Status = 1
+	ConnectionResult_STATUS_ERROR       ConnectionResult_Status = 2
+	ConnectionResult_STATUS_TIMEOUT     ConnectionResult_Status = 3
+	ConnectionResult_STATUS_REJECTED    ConnectionResult_Status = 4
 )
 
-// Enum value maps for CommandResult_Status.
+// Enum value maps for ConnectionResult_Status.
 var (
-	CommandResult_Status_name = map[int32]string{
+	ConnectionResult_Status_name = map[int32]string{
 		0: "STATUS_UNSPECIFIED",
 		1: "STATUS_OK",
 		2: "STATUS_ERROR",
 		3: "STATUS_TIMEOUT",
 		4: "STATUS_REJECTED",
 	}
-	CommandResult_Status_value = map[string]int32{
+	ConnectionResult_Status_value = map[string]int32{
 		"STATUS_UNSPECIFIED": 0,
 		"STATUS_OK":          1,
 		"STATUS_ERROR":       2,
@@ -50,31 +50,31 @@ var (
 	}
 )
 
-func (x CommandResult_Status) Enum() *CommandResult_Status {
-	p := new(CommandResult_Status)
+func (x ConnectionResult_Status) Enum() *ConnectionResult_Status {
+	p := new(ConnectionResult_Status)
 	*p = x
 	return p
 }
 
-func (x CommandResult_Status) String() string {
+func (x ConnectionResult_Status) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (CommandResult_Status) Descriptor() protoreflect.EnumDescriptor {
-	return file_command_v1_command_proto_enumTypes[0].Descriptor()
+func (ConnectionResult_Status) Descriptor() protoreflect.EnumDescriptor {
+	return file_connection_v1_connection_proto_enumTypes[0].Descriptor()
 }
 
-func (CommandResult_Status) Type() protoreflect.EnumType {
-	return &file_command_v1_command_proto_enumTypes[0]
+func (ConnectionResult_Status) Type() protoreflect.EnumType {
+	return &file_connection_v1_connection_proto_enumTypes[0]
 }
 
-func (x CommandResult_Status) Number() protoreflect.EnumNumber {
+func (x ConnectionResult_Status) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use CommandResult_Status.Descriptor instead.
-func (CommandResult_Status) EnumDescriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{10, 0}
+// Deprecated: Use ConnectionResult_Status.Descriptor instead.
+func (ConnectionResult_Status) EnumDescriptor() ([]byte, []int) {
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{10, 0}
 }
 
 // ClientMessage — конверт для всех сообщений клиента.
@@ -92,7 +92,7 @@ type ClientMessage struct {
 
 func (x *ClientMessage) Reset() {
 	*x = ClientMessage{}
-	mi := &file_command_v1_command_proto_msgTypes[0]
+	mi := &file_connection_v1_connection_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -104,7 +104,7 @@ func (x *ClientMessage) String() string {
 func (*ClientMessage) ProtoMessage() {}
 
 func (x *ClientMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[0]
+	mi := &file_connection_v1_connection_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -117,7 +117,7 @@ func (x *ClientMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientMessage.ProtoReflect.Descriptor instead.
 func (*ClientMessage) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{0}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ClientMessage) GetPayload() isClientMessage_Payload {
@@ -136,7 +136,7 @@ func (x *ClientMessage) GetRegister() *RegisterRequest {
 	return nil
 }
 
-func (x *ClientMessage) GetResult() *CommandResult {
+func (x *ClientMessage) GetResult() *ConnectionResult {
 	if x != nil {
 		if x, ok := x.Payload.(*ClientMessage_Result); ok {
 			return x.Result
@@ -163,7 +163,7 @@ type ClientMessage_Register struct {
 }
 
 type ClientMessage_Result struct {
-	Result *CommandResult `protobuf:"bytes,2,opt,name=result,proto3,oneof"`
+	Result *ConnectionResult `protobuf:"bytes,2,opt,name=result,proto3,oneof"`
 }
 
 type ClientMessage_Ping struct {
@@ -182,7 +182,7 @@ type ServerMessage struct {
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*ServerMessage_RegisterAck
-	//	*ServerMessage_Command
+	//	*ServerMessage_Connection
 	//	*ServerMessage_Pong
 	Payload       isServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
@@ -191,7 +191,7 @@ type ServerMessage struct {
 
 func (x *ServerMessage) Reset() {
 	*x = ServerMessage{}
-	mi := &file_command_v1_command_proto_msgTypes[1]
+	mi := &file_connection_v1_connection_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -203,7 +203,7 @@ func (x *ServerMessage) String() string {
 func (*ServerMessage) ProtoMessage() {}
 
 func (x *ServerMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[1]
+	mi := &file_connection_v1_connection_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -216,7 +216,7 @@ func (x *ServerMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerMessage.ProtoReflect.Descriptor instead.
 func (*ServerMessage) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{1}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ServerMessage) GetPayload() isServerMessage_Payload {
@@ -235,10 +235,10 @@ func (x *ServerMessage) GetRegisterAck() *RegisterResponse {
 	return nil
 }
 
-func (x *ServerMessage) GetCommand() *Command {
+func (x *ServerMessage) GetConnection() *Connection {
 	if x != nil {
-		if x, ok := x.Payload.(*ServerMessage_Command); ok {
-			return x.Command
+		if x, ok := x.Payload.(*ServerMessage_Connection); ok {
+			return x.Connection
 		}
 	}
 	return nil
@@ -261,8 +261,8 @@ type ServerMessage_RegisterAck struct {
 	RegisterAck *RegisterResponse `protobuf:"bytes,1,opt,name=register_ack,json=registerAck,proto3,oneof"`
 }
 
-type ServerMessage_Command struct {
-	Command *Command `protobuf:"bytes,2,opt,name=command,proto3,oneof"`
+type ServerMessage_Connection struct {
+	Connection *Connection `protobuf:"bytes,2,opt,name=connection,proto3,oneof"`
 }
 
 type ServerMessage_Pong struct {
@@ -271,7 +271,7 @@ type ServerMessage_Pong struct {
 
 func (*ServerMessage_RegisterAck) isServerMessage_Payload() {}
 
-func (*ServerMessage_Command) isServerMessage_Payload() {}
+func (*ServerMessage_Connection) isServerMessage_Payload() {}
 
 func (*ServerMessage_Pong) isServerMessage_Payload() {}
 
@@ -289,7 +289,7 @@ type RegisterRequest struct {
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_command_v1_command_proto_msgTypes[2]
+	mi := &file_connection_v1_connection_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -301,7 +301,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[2]
+	mi := &file_connection_v1_connection_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -314,7 +314,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{2}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *RegisterRequest) GetClientId() string {
@@ -350,7 +350,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_command_v1_command_proto_msgTypes[3]
+	mi := &file_connection_v1_connection_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -362,7 +362,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[3]
+	mi := &file_connection_v1_connection_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -375,7 +375,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{3}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RegisterResponse) GetSessionId() string {
@@ -401,7 +401,7 @@ type Ping struct {
 
 func (x *Ping) Reset() {
 	*x = Ping{}
-	mi := &file_command_v1_command_proto_msgTypes[4]
+	mi := &file_connection_v1_connection_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -413,7 +413,7 @@ func (x *Ping) String() string {
 func (*Ping) ProtoMessage() {}
 
 func (x *Ping) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[4]
+	mi := &file_connection_v1_connection_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -426,7 +426,7 @@ func (x *Ping) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ping.ProtoReflect.Descriptor instead.
 func (*Ping) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{4}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Ping) GetSeq() int64 {
@@ -445,7 +445,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_command_v1_command_proto_msgTypes[5]
+	mi := &file_connection_v1_connection_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -457,7 +457,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[5]
+	mi := &file_connection_v1_connection_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -470,7 +470,7 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{5}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Pong) GetSeq() int64 {
@@ -480,17 +480,17 @@ func (x *Pong) GetSeq() int64 {
 	return 0
 }
 
-// Command — команда для исполнения клиентом. Поле id обязательно:
-// клиент возвращает его в CommandResult.command_id.
-type Command struct {
+// connection — команда для исполнения клиентом. Поле id обязательно:
+// клиент возвращает его в ConnectionResult.connection_id.
+type Connection struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
-	//	*Command_Exec
-	//	*Command_ReadFile
-	//	*Command_WriteFile
-	Payload   isCommand_Payload      `protobuf_oneof:"payload"`
+	//	*Connection_Exec
+	//	*Connection_ReadFile
+	//	*Connection_WriteFile
+	Payload   isConnection_Payload   `protobuf_oneof:"payload"`
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// timeout_ms — лимит исполнения; 0 означает без таймаута.
 	TimeoutMs     int64 `protobuf:"varint,6,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
@@ -498,21 +498,21 @@ type Command struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Command) Reset() {
-	*x = Command{}
-	mi := &file_command_v1_command_proto_msgTypes[6]
+func (x *Connection) Reset() {
+	*x = Connection{}
+	mi := &file_connection_v1_connection_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Command) String() string {
+func (x *Connection) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Command) ProtoMessage() {}
+func (*Connection) ProtoMessage() {}
 
-func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[6]
+func (x *Connection) ProtoReflect() protoreflect.Message {
+	mi := &file_connection_v1_connection_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -523,111 +523,111 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Command.ProtoReflect.Descriptor instead.
-func (*Command) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{6}
+// Deprecated: Use Connection.ProtoReflect.Descriptor instead.
+func (*Connection) Descriptor() ([]byte, []int) {
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *Command) GetId() string {
+func (x *Connection) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *Command) GetPayload() isCommand_Payload {
+func (x *Connection) GetPayload() isConnection_Payload {
 	if x != nil {
 		return x.Payload
 	}
 	return nil
 }
 
-func (x *Command) GetExec() *ExecCommand {
+func (x *Connection) GetExec() *ExecConnection {
 	if x != nil {
-		if x, ok := x.Payload.(*Command_Exec); ok {
+		if x, ok := x.Payload.(*Connection_Exec); ok {
 			return x.Exec
 		}
 	}
 	return nil
 }
 
-func (x *Command) GetReadFile() *ReadFileRequest {
+func (x *Connection) GetReadFile() *ReadFileRequest {
 	if x != nil {
-		if x, ok := x.Payload.(*Command_ReadFile); ok {
+		if x, ok := x.Payload.(*Connection_ReadFile); ok {
 			return x.ReadFile
 		}
 	}
 	return nil
 }
 
-func (x *Command) GetWriteFile() *WriteFileRequest {
+func (x *Connection) GetWriteFile() *WriteFileRequest {
 	if x != nil {
-		if x, ok := x.Payload.(*Command_WriteFile); ok {
+		if x, ok := x.Payload.(*Connection_WriteFile); ok {
 			return x.WriteFile
 		}
 	}
 	return nil
 }
 
-func (x *Command) GetCreatedAt() *timestamppb.Timestamp {
+func (x *Connection) GetCreatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CreatedAt
 	}
 	return nil
 }
 
-func (x *Command) GetTimeoutMs() int64 {
+func (x *Connection) GetTimeoutMs() int64 {
 	if x != nil {
 		return x.TimeoutMs
 	}
 	return 0
 }
 
-type isCommand_Payload interface {
-	isCommand_Payload()
+type isConnection_Payload interface {
+	isConnection_Payload()
 }
 
-type Command_Exec struct {
-	Exec *ExecCommand `protobuf:"bytes,2,opt,name=exec,proto3,oneof"`
+type Connection_Exec struct {
+	Exec *ExecConnection `protobuf:"bytes,2,opt,name=exec,proto3,oneof"`
 }
 
-type Command_ReadFile struct {
+type Connection_ReadFile struct {
 	ReadFile *ReadFileRequest `protobuf:"bytes,3,opt,name=read_file,json=readFile,proto3,oneof"`
 }
 
-type Command_WriteFile struct {
+type Connection_WriteFile struct {
 	WriteFile *WriteFileRequest `protobuf:"bytes,4,opt,name=write_file,json=writeFile,proto3,oneof"`
 }
 
-func (*Command_Exec) isCommand_Payload() {}
+func (*Connection_Exec) isConnection_Payload() {}
 
-func (*Command_ReadFile) isCommand_Payload() {}
+func (*Connection_ReadFile) isConnection_Payload() {}
 
-func (*Command_WriteFile) isCommand_Payload() {}
+func (*Connection_WriteFile) isConnection_Payload() {}
 
-// ExecCommand — запуск процесса.
-type ExecCommand struct {
+// ExecConnection — запуск процесса.
+type ExecConnection struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Cmd           string                 `protobuf:"bytes,1,opt,name=cmd,proto3" json:"cmd,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ExecCommand) Reset() {
-	*x = ExecCommand{}
-	mi := &file_command_v1_command_proto_msgTypes[7]
+func (x *ExecConnection) Reset() {
+	*x = ExecConnection{}
+	mi := &file_connection_v1_connection_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ExecCommand) String() string {
+func (x *ExecConnection) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ExecCommand) ProtoMessage() {}
+func (*ExecConnection) ProtoMessage() {}
 
-func (x *ExecCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[7]
+func (x *ExecConnection) ProtoReflect() protoreflect.Message {
+	mi := &file_connection_v1_connection_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -638,12 +638,12 @@ func (x *ExecCommand) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ExecCommand.ProtoReflect.Descriptor instead.
-func (*ExecCommand) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{7}
+// Deprecated: Use ExecConnection.ProtoReflect.Descriptor instead.
+func (*ExecConnection) Descriptor() ([]byte, []int) {
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *ExecCommand) GetCmd() string {
+func (x *ExecConnection) GetCmd() string {
 	if x != nil {
 		return x.Cmd
 	}
@@ -662,7 +662,7 @@ type ReadFileRequest struct {
 
 func (x *ReadFileRequest) Reset() {
 	*x = ReadFileRequest{}
-	mi := &file_command_v1_command_proto_msgTypes[8]
+	mi := &file_connection_v1_connection_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -674,7 +674,7 @@ func (x *ReadFileRequest) String() string {
 func (*ReadFileRequest) ProtoMessage() {}
 
 func (x *ReadFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[8]
+	mi := &file_connection_v1_connection_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -687,7 +687,7 @@ func (x *ReadFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadFileRequest.ProtoReflect.Descriptor instead.
 func (*ReadFileRequest) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{8}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ReadFileRequest) GetPath() string {
@@ -716,7 +716,7 @@ type WriteFileRequest struct {
 
 func (x *WriteFileRequest) Reset() {
 	*x = WriteFileRequest{}
-	mi := &file_command_v1_command_proto_msgTypes[9]
+	mi := &file_connection_v1_connection_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -728,7 +728,7 @@ func (x *WriteFileRequest) String() string {
 func (*WriteFileRequest) ProtoMessage() {}
 
 func (x *WriteFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[9]
+	mi := &file_connection_v1_connection_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -741,7 +741,7 @@ func (x *WriteFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WriteFileRequest.ProtoReflect.Descriptor instead.
 func (*WriteFileRequest) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{9}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *WriteFileRequest) GetPath() string {
@@ -765,16 +765,16 @@ func (x *WriteFileRequest) GetCreateDirs() bool {
 	return false
 }
 
-// CommandResult — результат исполнения команды.
-type CommandResult struct {
-	state     protoimpl.MessageState `protogen:"open.v1"`
-	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
-	Status    CommandResult_Status   `protobuf:"varint,2,opt,name=status,proto3,enum=akira.command.v1.CommandResult_Status" json:"status,omitempty"`
-	// exit_code — валиден только для ExecCommand.
+// ConnectionResult — результат исполнения команды.
+type ConnectionResult struct {
+	state        protoimpl.MessageState  `protogen:"open.v1"`
+	ConnectionId string                  `protobuf:"bytes,1,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	Status       ConnectionResult_Status `protobuf:"varint,2,opt,name=status,proto3,enum=akira.connection.v1.ConnectionResult_Status" json:"status,omitempty"`
+	// exit_code — валиден только для ExecConnection.
 	ExitCode int32 `protobuf:"varint,3,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
-	// stdout — валиден для ExecCommand и ReadFileRequest.
+	// stdout — валиден для ExecConnection и ReadFileRequest.
 	Stdout []byte `protobuf:"bytes,4,opt,name=stdout,proto3" json:"stdout,omitempty"`
-	// stderr — валиден только для ExecCommand.
+	// stderr — валиден только для ExecConnection.
 	Stderr []byte `protobuf:"bytes,5,opt,name=stderr,proto3" json:"stderr,omitempty"`
 	// error — текст ошибки при status = STATUS_ERROR.
 	Error string `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
@@ -784,21 +784,21 @@ type CommandResult struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CommandResult) Reset() {
-	*x = CommandResult{}
-	mi := &file_command_v1_command_proto_msgTypes[10]
+func (x *ConnectionResult) Reset() {
+	*x = ConnectionResult{}
+	mi := &file_connection_v1_connection_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CommandResult) String() string {
+func (x *ConnectionResult) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CommandResult) ProtoMessage() {}
+func (*ConnectionResult) ProtoMessage() {}
 
-func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_command_v1_command_proto_msgTypes[10]
+func (x *ConnectionResult) ProtoReflect() protoreflect.Message {
+	mi := &file_connection_v1_connection_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -809,74 +809,76 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
-func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_command_v1_command_proto_rawDescGZIP(), []int{10}
+// Deprecated: Use ConnectionResult.ProtoReflect.Descriptor instead.
+func (*ConnectionResult) Descriptor() ([]byte, []int) {
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *CommandResult) GetCommandId() string {
+func (x *ConnectionResult) GetConnectionId() string {
 	if x != nil {
-		return x.CommandId
+		return x.ConnectionId
 	}
 	return ""
 }
 
-func (x *CommandResult) GetStatus() CommandResult_Status {
+func (x *ConnectionResult) GetStatus() ConnectionResult_Status {
 	if x != nil {
 		return x.Status
 	}
-	return CommandResult_STATUS_UNSPECIFIED
+	return ConnectionResult_STATUS_UNSPECIFIED
 }
 
-func (x *CommandResult) GetExitCode() int32 {
+func (x *ConnectionResult) GetExitCode() int32 {
 	if x != nil {
 		return x.ExitCode
 	}
 	return 0
 }
 
-func (x *CommandResult) GetStdout() []byte {
+func (x *ConnectionResult) GetStdout() []byte {
 	if x != nil {
 		return x.Stdout
 	}
 	return nil
 }
 
-func (x *CommandResult) GetStderr() []byte {
+func (x *ConnectionResult) GetStderr() []byte {
 	if x != nil {
 		return x.Stderr
 	}
 	return nil
 }
 
-func (x *CommandResult) GetError() string {
+func (x *ConnectionResult) GetError() string {
 	if x != nil {
 		return x.Error
 	}
 	return ""
 }
 
-func (x *CommandResult) GetDurationMs() int64 {
+func (x *ConnectionResult) GetDurationMs() int64 {
 	if x != nil {
 		return x.DurationMs
 	}
 	return 0
 }
 
-var File_command_v1_command_proto protoreflect.FileDescriptor
+var File_connection_v1_connection_proto protoreflect.FileDescriptor
 
-const file_command_v1_command_proto_rawDesc = "" +
+const file_connection_v1_connection_proto_rawDesc = "" +
 	"\n" +
-	"\x18command/v1/command.proto\x12\x10akira.command.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc4\x01\n" +
-	"\rClientMessage\x12?\n" +
-	"\bregister\x18\x01 \x01(\v2!.akira.command.v1.RegisterRequestH\x00R\bregister\x129\n" +
-	"\x06result\x18\x02 \x01(\v2\x1f.akira.command.v1.CommandResultH\x00R\x06result\x12,\n" +
-	"\x04ping\x18\x03 \x01(\v2\x16.akira.command.v1.PingH\x00R\x04pingB\t\n" +
-	"\apayload\"\xc8\x01\n" +
-	"\rServerMessage\x12G\n" +
-	"\fregister_ack\x18\x01 \x01(\v2\".akira.command.v1.RegisterResponseH\x00R\vregisterAck\x125\n" +
-	"\acommand\x18\x02 \x01(\v2\x19.akira.command.v1.CommandH\x00R\acommand\x12,\n" +
-	"\x04pong\x18\x03 \x01(\v2\x16.akira.command.v1.PongH\x00R\x04pongB\t\n" +
+	"\x1econnection/v1/connection.proto\x12\x13akira.connection.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd0\x01\n" +
+	"\rClientMessage\x12B\n" +
+	"\bregister\x18\x01 \x01(\v2$.akira.connection.v1.RegisterRequestH\x00R\bregister\x12?\n" +
+	"\x06result\x18\x02 \x01(\v2%.akira.connection.v1.ConnectionResultH\x00R\x06result\x12/\n" +
+	"\x04ping\x18\x03 \x01(\v2\x19.akira.connection.v1.PingH\x00R\x04pingB\t\n" +
+	"\apayload\"\xda\x01\n" +
+	"\rServerMessage\x12J\n" +
+	"\fregister_ack\x18\x01 \x01(\v2%.akira.connection.v1.RegisterResponseH\x00R\vregisterAck\x12A\n" +
+	"\n" +
+	"connection\x18\x02 \x01(\v2\x1f.akira.connection.v1.ConnectionH\x00R\n" +
+	"connection\x12/\n" +
+	"\x04pong\x18\x03 \x01(\v2\x19.akira.connection.v1.PongH\x00R\x04pongB\t\n" +
 	"\apayload\"f\n" +
 	"\x0fRegisterRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x1a\n" +
@@ -889,19 +891,20 @@ const file_command_v1_command_proto_rawDesc = "" +
 	"\x04Ping\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\"\x18\n" +
 	"\x04Pong\x12\x10\n" +
-	"\x03seq\x18\x01 \x01(\x03R\x03seq\"\xba\x02\n" +
-	"\aCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x123\n" +
-	"\x04exec\x18\x02 \x01(\v2\x1d.akira.command.v1.ExecCommandH\x00R\x04exec\x12@\n" +
-	"\tread_file\x18\x03 \x01(\v2!.akira.command.v1.ReadFileRequestH\x00R\breadFile\x12C\n" +
+	"\x03seq\x18\x01 \x01(\x03R\x03seq\"\xc9\x02\n" +
 	"\n" +
-	"write_file\x18\x04 \x01(\v2\".akira.command.v1.WriteFileRequestH\x00R\twriteFile\x129\n" +
+	"Connection\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x129\n" +
+	"\x04exec\x18\x02 \x01(\v2#.akira.connection.v1.ExecConnectionH\x00R\x04exec\x12C\n" +
+	"\tread_file\x18\x03 \x01(\v2$.akira.connection.v1.ReadFileRequestH\x00R\breadFile\x12F\n" +
+	"\n" +
+	"write_file\x18\x04 \x01(\v2%.akira.connection.v1.WriteFileRequestH\x00R\twriteFile\x129\n" +
 	"\n" +
 	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x1d\n" +
 	"\n" +
 	"timeout_ms\x18\x06 \x01(\x03R\ttimeoutMsB\t\n" +
-	"\apayload\"\x1f\n" +
-	"\vExecCommand\x12\x10\n" +
+	"\apayload\"\"\n" +
+	"\x0eExecConnection\x12\x10\n" +
 	"\x03cmd\x18\x01 \x01(\tR\x03cmd\"B\n" +
 	"\x0fReadFileRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1b\n" +
@@ -910,11 +913,10 @@ const file_command_v1_command_proto_rawDesc = "" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\fR\acontent\x12\x1f\n" +
 	"\vcreate_dirs\x18\x03 \x01(\bR\n" +
-	"createDirs\"\xde\x02\n" +
-	"\rCommandResult\x12\x1d\n" +
-	"\n" +
-	"command_id\x18\x01 \x01(\tR\tcommandId\x12>\n" +
-	"\x06status\x18\x02 \x01(\x0e2&.akira.command.v1.CommandResult.StatusR\x06status\x12\x1b\n" +
+	"createDirs\"\xed\x02\n" +
+	"\x10ConnectionResult\x12#\n" +
+	"\rconnection_id\x18\x01 \x01(\tR\fconnectionId\x12D\n" +
+	"\x06status\x18\x02 \x01(\x0e2,.akira.connection.v1.ConnectionResult.StatusR\x06status\x12\x1b\n" +
 	"\texit_code\x18\x03 \x01(\x05R\bexitCode\x12\x16\n" +
 	"\x06stdout\x18\x04 \x01(\fR\x06stdout\x12\x16\n" +
 	"\x06stderr\x18\x05 \x01(\fR\x06stderr\x12\x14\n" +
@@ -926,53 +928,53 @@ const file_command_v1_command_proto_rawDesc = "" +
 	"\tSTATUS_OK\x10\x01\x12\x10\n" +
 	"\fSTATUS_ERROR\x10\x02\x12\x12\n" +
 	"\x0eSTATUS_TIMEOUT\x10\x03\x12\x13\n" +
-	"\x0fSTATUS_REJECTED\x10\x042a\n" +
-	"\x0eCommandService\x12O\n" +
-	"\aConnect\x12\x1f.akira.command.v1.ClientMessage\x1a\x1f.akira.command.v1.ServerMessage(\x010\x01BDZBgithub.com/PinguinAdvokat/akira-mcp/pkg/api/commandpb/v1;commandpbb\x06proto3"
+	"\x0fSTATUS_REJECTED\x10\x042j\n" +
+	"\x11ConnectionService\x12U\n" +
+	"\aConnect\x12\".akira.connection.v1.ClientMessage\x1a\".akira.connection.v1.ServerMessage(\x010\x01BJZHgithub.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1;connectionpbb\x06proto3"
 
 var (
-	file_command_v1_command_proto_rawDescOnce sync.Once
-	file_command_v1_command_proto_rawDescData []byte
+	file_connection_v1_connection_proto_rawDescOnce sync.Once
+	file_connection_v1_connection_proto_rawDescData []byte
 )
 
-func file_command_v1_command_proto_rawDescGZIP() []byte {
-	file_command_v1_command_proto_rawDescOnce.Do(func() {
-		file_command_v1_command_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_command_v1_command_proto_rawDesc), len(file_command_v1_command_proto_rawDesc)))
+func file_connection_v1_connection_proto_rawDescGZIP() []byte {
+	file_connection_v1_connection_proto_rawDescOnce.Do(func() {
+		file_connection_v1_connection_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_connection_v1_connection_proto_rawDesc), len(file_connection_v1_connection_proto_rawDesc)))
 	})
-	return file_command_v1_command_proto_rawDescData
+	return file_connection_v1_connection_proto_rawDescData
 }
 
-var file_command_v1_command_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_command_v1_command_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
-var file_command_v1_command_proto_goTypes = []any{
-	(CommandResult_Status)(0),     // 0: akira.command.v1.CommandResult.Status
-	(*ClientMessage)(nil),         // 1: akira.command.v1.ClientMessage
-	(*ServerMessage)(nil),         // 2: akira.command.v1.ServerMessage
-	(*RegisterRequest)(nil),       // 3: akira.command.v1.RegisterRequest
-	(*RegisterResponse)(nil),      // 4: akira.command.v1.RegisterResponse
-	(*Ping)(nil),                  // 5: akira.command.v1.Ping
-	(*Pong)(nil),                  // 6: akira.command.v1.Pong
-	(*Command)(nil),               // 7: akira.command.v1.Command
-	(*ExecCommand)(nil),           // 8: akira.command.v1.ExecCommand
-	(*ReadFileRequest)(nil),       // 9: akira.command.v1.ReadFileRequest
-	(*WriteFileRequest)(nil),      // 10: akira.command.v1.WriteFileRequest
-	(*CommandResult)(nil),         // 11: akira.command.v1.CommandResult
+var file_connection_v1_connection_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_connection_v1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_connection_v1_connection_proto_goTypes = []any{
+	(ConnectionResult_Status)(0),  // 0: akira.connection.v1.ConnectionResult.Status
+	(*ClientMessage)(nil),         // 1: akira.connection.v1.ClientMessage
+	(*ServerMessage)(nil),         // 2: akira.connection.v1.ServerMessage
+	(*RegisterRequest)(nil),       // 3: akira.connection.v1.RegisterRequest
+	(*RegisterResponse)(nil),      // 4: akira.connection.v1.RegisterResponse
+	(*Ping)(nil),                  // 5: akira.connection.v1.Ping
+	(*Pong)(nil),                  // 6: akira.connection.v1.Pong
+	(*Connection)(nil),            // 7: akira.connection.v1.Connection
+	(*ExecConnection)(nil),        // 8: akira.connection.v1.ExecConnection
+	(*ReadFileRequest)(nil),       // 9: akira.connection.v1.ReadFileRequest
+	(*WriteFileRequest)(nil),      // 10: akira.connection.v1.WriteFileRequest
+	(*ConnectionResult)(nil),      // 11: akira.connection.v1.ConnectionResult
 	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
 }
-var file_command_v1_command_proto_depIdxs = []int32{
-	3,  // 0: akira.command.v1.ClientMessage.register:type_name -> akira.command.v1.RegisterRequest
-	11, // 1: akira.command.v1.ClientMessage.result:type_name -> akira.command.v1.CommandResult
-	5,  // 2: akira.command.v1.ClientMessage.ping:type_name -> akira.command.v1.Ping
-	4,  // 3: akira.command.v1.ServerMessage.register_ack:type_name -> akira.command.v1.RegisterResponse
-	7,  // 4: akira.command.v1.ServerMessage.command:type_name -> akira.command.v1.Command
-	6,  // 5: akira.command.v1.ServerMessage.pong:type_name -> akira.command.v1.Pong
-	8,  // 6: akira.command.v1.Command.exec:type_name -> akira.command.v1.ExecCommand
-	9,  // 7: akira.command.v1.Command.read_file:type_name -> akira.command.v1.ReadFileRequest
-	10, // 8: akira.command.v1.Command.write_file:type_name -> akira.command.v1.WriteFileRequest
-	12, // 9: akira.command.v1.Command.created_at:type_name -> google.protobuf.Timestamp
-	0,  // 10: akira.command.v1.CommandResult.status:type_name -> akira.command.v1.CommandResult.Status
-	1,  // 11: akira.command.v1.CommandService.Connect:input_type -> akira.command.v1.ClientMessage
-	2,  // 12: akira.command.v1.CommandService.Connect:output_type -> akira.command.v1.ServerMessage
+var file_connection_v1_connection_proto_depIdxs = []int32{
+	3,  // 0: akira.connection.v1.ClientMessage.register:type_name -> akira.connection.v1.RegisterRequest
+	11, // 1: akira.connection.v1.ClientMessage.result:type_name -> akira.connection.v1.ConnectionResult
+	5,  // 2: akira.connection.v1.ClientMessage.ping:type_name -> akira.connection.v1.Ping
+	4,  // 3: akira.connection.v1.ServerMessage.register_ack:type_name -> akira.connection.v1.RegisterResponse
+	7,  // 4: akira.connection.v1.ServerMessage.connection:type_name -> akira.connection.v1.Connection
+	6,  // 5: akira.connection.v1.ServerMessage.pong:type_name -> akira.connection.v1.Pong
+	8,  // 6: akira.connection.v1.Connection.exec:type_name -> akira.connection.v1.ExecConnection
+	9,  // 7: akira.connection.v1.Connection.read_file:type_name -> akira.connection.v1.ReadFileRequest
+	10, // 8: akira.connection.v1.Connection.write_file:type_name -> akira.connection.v1.WriteFileRequest
+	12, // 9: akira.connection.v1.Connection.created_at:type_name -> google.protobuf.Timestamp
+	0,  // 10: akira.connection.v1.ConnectionResult.status:type_name -> akira.connection.v1.ConnectionResult.Status
+	1,  // 11: akira.connection.v1.ConnectionService.Connect:input_type -> akira.connection.v1.ClientMessage
+	2,  // 12: akira.connection.v1.ConnectionService.Connect:output_type -> akira.connection.v1.ServerMessage
 	12, // [12:13] is the sub-list for method output_type
 	11, // [11:12] is the sub-list for method input_type
 	11, // [11:11] is the sub-list for extension type_name
@@ -980,42 +982,42 @@ var file_command_v1_command_proto_depIdxs = []int32{
 	0,  // [0:11] is the sub-list for field type_name
 }
 
-func init() { file_command_v1_command_proto_init() }
-func file_command_v1_command_proto_init() {
-	if File_command_v1_command_proto != nil {
+func init() { file_connection_v1_connection_proto_init() }
+func file_connection_v1_connection_proto_init() {
+	if File_connection_v1_connection_proto != nil {
 		return
 	}
-	file_command_v1_command_proto_msgTypes[0].OneofWrappers = []any{
+	file_connection_v1_connection_proto_msgTypes[0].OneofWrappers = []any{
 		(*ClientMessage_Register)(nil),
 		(*ClientMessage_Result)(nil),
 		(*ClientMessage_Ping)(nil),
 	}
-	file_command_v1_command_proto_msgTypes[1].OneofWrappers = []any{
+	file_connection_v1_connection_proto_msgTypes[1].OneofWrappers = []any{
 		(*ServerMessage_RegisterAck)(nil),
-		(*ServerMessage_Command)(nil),
+		(*ServerMessage_Connection)(nil),
 		(*ServerMessage_Pong)(nil),
 	}
-	file_command_v1_command_proto_msgTypes[6].OneofWrappers = []any{
-		(*Command_Exec)(nil),
-		(*Command_ReadFile)(nil),
-		(*Command_WriteFile)(nil),
+	file_connection_v1_connection_proto_msgTypes[6].OneofWrappers = []any{
+		(*Connection_Exec)(nil),
+		(*Connection_ReadFile)(nil),
+		(*Connection_WriteFile)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_command_v1_command_proto_rawDesc), len(file_command_v1_command_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_connection_v1_connection_proto_rawDesc), len(file_connection_v1_connection_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_command_v1_command_proto_goTypes,
-		DependencyIndexes: file_command_v1_command_proto_depIdxs,
-		EnumInfos:         file_command_v1_command_proto_enumTypes,
-		MessageInfos:      file_command_v1_command_proto_msgTypes,
+		GoTypes:           file_connection_v1_connection_proto_goTypes,
+		DependencyIndexes: file_connection_v1_connection_proto_depIdxs,
+		EnumInfos:         file_connection_v1_connection_proto_enumTypes,
+		MessageInfos:      file_connection_v1_connection_proto_msgTypes,
 	}.Build()
-	File_command_v1_command_proto = out.File
-	file_command_v1_command_proto_goTypes = nil
-	file_command_v1_command_proto_depIdxs = nil
+	File_connection_v1_connection_proto = out.File
+	file_connection_v1_connection_proto_goTypes = nil
+	file_connection_v1_connection_proto_depIdxs = nil
 }

@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v7.34.1
-// source: command/v1/command.proto
+// source: connection/v1/connection.proto
 
-package commandpb
+package connectionpb
 
 import (
 	context "context"
@@ -19,33 +19,33 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CommandService_Connect_FullMethodName = "/akira.command.v1.CommandService/Connect"
+	ConnectionService_Connect_FullMethodName = "/akira.connection.v1.ConnectionService/Connect"
 )
 
-// CommandServiceClient is the client API for CommandService service.
+// ConnectionServiceClient is the client API for ConnectionService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// CommandService — долгоживущее stream-соединение: клиент подключается
+// connectionService — долгоживущее stream-соединение: клиент подключается
 // и держит поток открытым, сервер отправляет команды для исполнения,
 // клиент возвращает результаты по тому же потоку.
-type CommandServiceClient interface {
+type ConnectionServiceClient interface {
 	// Connect открывает двунаправленный поток. Первым сообщением клиент
 	// обязан отправить RegisterRequest.
 	Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientMessage, ServerMessage], error)
 }
 
-type commandServiceClient struct {
+type connectionServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewCommandServiceClient(cc grpc.ClientConnInterface) CommandServiceClient {
-	return &commandServiceClient{cc}
+func NewConnectionServiceClient(cc grpc.ClientConnInterface) ConnectionServiceClient {
+	return &connectionServiceClient{cc}
 }
 
-func (c *commandServiceClient) Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientMessage, ServerMessage], error) {
+func (c *connectionServiceClient) Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientMessage, ServerMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &CommandService_ServiceDesc.Streams[0], CommandService_Connect_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &ConnectionService_ServiceDesc.Streams[0], ConnectionService_Connect_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -54,74 +54,74 @@ func (c *commandServiceClient) Connect(ctx context.Context, opts ...grpc.CallOpt
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type CommandService_ConnectClient = grpc.BidiStreamingClient[ClientMessage, ServerMessage]
+type ConnectionService_ConnectClient = grpc.BidiStreamingClient[ClientMessage, ServerMessage]
 
-// CommandServiceServer is the server API for CommandService service.
-// All implementations must embed UnimplementedCommandServiceServer
+// ConnectionServiceServer is the server API for ConnectionService service.
+// All implementations must embed UnimplementedConnectionServiceServer
 // for forward compatibility.
 //
-// CommandService — долгоживущее stream-соединение: клиент подключается
+// connectionService — долгоживущее stream-соединение: клиент подключается
 // и держит поток открытым, сервер отправляет команды для исполнения,
 // клиент возвращает результаты по тому же потоку.
-type CommandServiceServer interface {
+type ConnectionServiceServer interface {
 	// Connect открывает двунаправленный поток. Первым сообщением клиент
 	// обязан отправить RegisterRequest.
 	Connect(grpc.BidiStreamingServer[ClientMessage, ServerMessage]) error
-	mustEmbedUnimplementedCommandServiceServer()
+	mustEmbedUnimplementedConnectionServiceServer()
 }
 
-// UnimplementedCommandServiceServer must be embedded to have
+// UnimplementedConnectionServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedCommandServiceServer struct{}
+type UnimplementedConnectionServiceServer struct{}
 
-func (UnimplementedCommandServiceServer) Connect(grpc.BidiStreamingServer[ClientMessage, ServerMessage]) error {
+func (UnimplementedConnectionServiceServer) Connect(grpc.BidiStreamingServer[ClientMessage, ServerMessage]) error {
 	return status.Error(codes.Unimplemented, "method Connect not implemented")
 }
-func (UnimplementedCommandServiceServer) mustEmbedUnimplementedCommandServiceServer() {}
-func (UnimplementedCommandServiceServer) testEmbeddedByValue()                        {}
+func (UnimplementedConnectionServiceServer) mustEmbedUnimplementedConnectionServiceServer() {}
+func (UnimplementedConnectionServiceServer) testEmbeddedByValue()                           {}
 
-// UnsafeCommandServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to CommandServiceServer will
+// UnsafeConnectionServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ConnectionServiceServer will
 // result in compilation errors.
-type UnsafeCommandServiceServer interface {
-	mustEmbedUnimplementedCommandServiceServer()
+type UnsafeConnectionServiceServer interface {
+	mustEmbedUnimplementedConnectionServiceServer()
 }
 
-func RegisterCommandServiceServer(s grpc.ServiceRegistrar, srv CommandServiceServer) {
-	// If the following call panics, it indicates UnimplementedCommandServiceServer was
+func RegisterConnectionServiceServer(s grpc.ServiceRegistrar, srv ConnectionServiceServer) {
+	// If the following call panics, it indicates UnimplementedConnectionServiceServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&CommandService_ServiceDesc, srv)
+	s.RegisterService(&ConnectionService_ServiceDesc, srv)
 }
 
-func _CommandService_Connect_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(CommandServiceServer).Connect(&grpc.GenericServerStream[ClientMessage, ServerMessage]{ServerStream: stream})
+func _ConnectionService_Connect_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ConnectionServiceServer).Connect(&grpc.GenericServerStream[ClientMessage, ServerMessage]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type CommandService_ConnectServer = grpc.BidiStreamingServer[ClientMessage, ServerMessage]
+type ConnectionService_ConnectServer = grpc.BidiStreamingServer[ClientMessage, ServerMessage]
 
-// CommandService_ServiceDesc is the grpc.ServiceDesc for CommandService service.
+// ConnectionService_ServiceDesc is the grpc.ServiceDesc for ConnectionService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var CommandService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "akira.command.v1.CommandService",
-	HandlerType: (*CommandServiceServer)(nil),
+var ConnectionService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "akira.connection.v1.ConnectionService",
+	HandlerType: (*ConnectionServiceServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Connect",
-			Handler:       _CommandService_Connect_Handler,
+			Handler:       _ConnectionService_Connect_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},
 	},
-	Metadata: "command/v1/command.proto",
+	Metadata: "connection/v1/connection.proto",
 }

@@ -1,15 +1,15 @@
 syntax = "proto3";
 
-package akira.command.v1;
-
-option go_package = "github.com/PinguinAdvokat/akira-mcp/pkg/api/commandpb/v1;commandpb";
+package akira.connection.v1;
 
 import "google/protobuf/timestamp.proto";
 
-// CommandService — долгоживущее stream-соединение: клиент подключается
+option go_package = "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1;connectionpb";
+
+// connectionService — долгоживущее stream-соединение: клиент подключается
 // и держит поток открытым, сервер отправляет команды для исполнения,
 // клиент возвращает результаты по тому же потоку.
-service CommandService {
+service ConnectionService {
   // Connect открывает двунаправленный поток. Первым сообщением клиент
   // обязан отправить RegisterRequest.
   rpc Connect(stream ClientMessage) returns (stream ServerMessage);
@@ -19,7 +19,7 @@ service CommandService {
 message ClientMessage {
   oneof payload {
     RegisterRequest register = 1;
-    CommandResult result = 2;
+    ConnectionResult result = 2;
     Ping ping = 3;
   }
 }
@@ -28,7 +28,7 @@ message ClientMessage {
 message ServerMessage {
   oneof payload {
     RegisterResponse register_ack = 1;
-    Command command = 2;
+    Connection connection = 2;
     Pong pong = 3;
   }
 }
@@ -57,12 +57,12 @@ message Pong {
   int64 seq = 1;
 }
 
-// Command — команда для исполнения клиентом. Поле id обязательно:
-// клиент возвращает его в CommandResult.command_id.
-message Command {
+// connection — команда для исполнения клиентом. Поле id обязательно:
+// клиент возвращает его в ConnectionResult.connection_id.
+message Connection {
   string id = 1;
   oneof payload {
-    ExecCommand exec = 2;
+    ExecConnection exec = 2;
     ReadFileRequest read_file = 3;
     WriteFileRequest write_file = 4;
   }
@@ -71,9 +71,9 @@ message Command {
   int64 timeout_ms = 6;
 }
 
-// ExecCommand — запуск процесса.
-message ExecCommand {
-    string cmd = 1;
+// ExecConnection — запуск процесса.
+message ExecConnection {
+  string cmd = 1;
 }
 
 // ReadFileRequest — прочитать файл и вернуть содержимое.
@@ -90,15 +90,15 @@ message WriteFileRequest {
   bool create_dirs = 3;
 }
 
-// CommandResult — результат исполнения команды.
-message CommandResult {
-  string command_id = 1;
+// ConnectionResult — результат исполнения команды.
+message ConnectionResult {
+  string connection_id = 1;
   Status status = 2;
-  // exit_code — валиден только для ExecCommand.
+  // exit_code — валиден только для ExecConnection.
   int32 exit_code = 3;
-  // stdout — валиден для ExecCommand и ReadFileRequest.
+  // stdout — валиден для ExecConnection и ReadFileRequest.
   bytes stdout = 4;
-  // stderr — валиден только для ExecCommand.
+  // stderr — валиден только для ExecConnection.
   bytes stderr = 5;
   // error — текст ошибки при status = STATUS_ERROR.
   string error = 6;
