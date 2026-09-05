@@ -19,7 +19,7 @@ service ConnectionService {
 message ClientMessage {
   oneof payload {
     RegisterRequest register = 1;
-    ConnectionResult result = 2;
+    TaskResult result = 2;
     Ping ping = 3;
   }
 }
@@ -28,7 +28,7 @@ message ClientMessage {
 message ServerMessage {
   oneof payload {
     RegisterResponse register_ack = 1;
-    Connection connection = 2;
+    Task task = 2;
     Pong pong = 3;
   }
 }
@@ -57,12 +57,12 @@ message Pong {
   int64 seq = 1;
 }
 
-// connection — команда для исполнения клиентом. Поле id обязательно:
-// клиент возвращает его в ConnectionResult.connection_id.
-message Connection {
+// task — команда для исполнения клиентом. Поле id обязательно:
+// клиент возвращает его в TaskResult.task_id.
+message Task {
   string id = 1;
   oneof payload {
-    ExecConnection exec = 2;
+    ExecTask exec = 2;
     ReadFileRequest read_file = 3;
     WriteFileRequest write_file = 4;
   }
@@ -71,8 +71,8 @@ message Connection {
   int64 timeout_ms = 6;
 }
 
-// ExecConnection — запуск процесса.
-message ExecConnection {
+// ExecTask — запуск процесса.
+message ExecTask {
   string cmd = 1;
 }
 
@@ -90,15 +90,15 @@ message WriteFileRequest {
   bool create_dirs = 3;
 }
 
-// ConnectionResult — результат исполнения команды.
-message ConnectionResult {
-  string connection_id = 1;
+// TaskResult — результат исполнения команды.
+message TaskResult {
+  string task_id = 1;
   Status status = 2;
-  // exit_code — валиден только для ExecConnection.
+  // exit_code — валиден только для ExecTask.
   int32 exit_code = 3;
-  // stdout — валиден для ExecConnection и ReadFileRequest.
+  // stdout — валиден для ExecTask и ReadFileRequest.
   bytes stdout = 4;
-  // stderr — валиден только для ExecConnection.
+  // stderr — валиден только для ExecTask.
   bytes stderr = 5;
   // error — текст ошибки при status = STATUS_ERROR.
   string error = 6;

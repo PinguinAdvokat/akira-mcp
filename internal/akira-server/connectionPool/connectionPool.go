@@ -46,7 +46,7 @@ func (p *ConnectionPool) Register(clientID string) (*ClientConnection, error) {
 		SessionID: newID(),
 		out:      make(chan *pb.ServerMessage, 16),
 		done:     make(chan struct{}),
-		pending:  make(map[string]chan *pb.ConnectionResult),
+		pending:  make(map[string]chan *pb.TaskResult),
 	}
 	p.conns[clientID] = c
 	return c, nil
@@ -65,8 +65,8 @@ func (p *ConnectionPool) Unregister(conn *ClientConnection) {
 }
 
 // SendCommand отправляет команду клиенту с id clientID и ждёт
-// ConnectionResult по тому же stream-соединению.
-func (p *ConnectionPool) SendCommand(ctx context.Context, clientID string, cmd *pb.Connection) (*pb.ConnectionResult, error) {
+// TaskResult по тому же stream-соединению.
+func (p *ConnectionPool) SendCommand(ctx context.Context, clientID string, cmd *pb.Task) (*pb.TaskResult, error) {
 	p.mu.RLock()
 	c := p.conns[clientID]
 	p.mu.RUnlock()
@@ -84,7 +84,7 @@ type ClientConnection struct {
 	out    chan *pb.ServerMessage
 	done   chan struct{}
 	mu     sync.Mutex
-	pending map[string]chan *pb.ConnectionResult
+	pending map[string]chan *pb.TaskResult
 }
 
 // Out — канал исходящих сообщений; сервер вычитывает их
@@ -103,7 +103,7 @@ func (c *ClientConnection) Post(msg *pb.ServerMessage) error {
 
 // Execute отправляет команду клиенту и блокируется до результата,
 // закрытия соединения, таймаута команды или отмены ctx.
-func (c *ClientConnection) Execute(ctx context.Context, cmd *pb.Connection) (*pb.ConnectionResult, error) {
+func (c *ClientConnection) Execute(ctx context.Context, cmd *pb.Task) (*pb.TaskResult, error) {
 	if cmd.Id == "" {
 		cmd.Id = newID()
 	}
@@ -111,7 +111,7 @@ func (c *ClientConnection) Execute(ctx context.Context, cmd *pb.Connection) (*pb
 		cmd.CreatedAt = timestamppb.Now()
 	}
 
-	ch := make(chan *pb.ConnectionResult, 1)
+	ch := make(chan *pb.TaskResult, 1)
 	c.mu.Lock()
 	c.pending[cmd.Id] = ch
 	c.mu.Unlock()
@@ -122,7 +122,7 @@ func (c *ClientConnection) Execute(ctx context.Context, cmd *pb.Connection) (*pb
 	}()
 
 	if err := c.Post(&pb.ServerMessage{
-		Payload: &pb.ServerMessage_Connection{Connection: cmd},
+		Payload: &pb.ServerMessage_Task{Task: cmd},
 	}); err != nil {
 		return nil, err
 	}
@@ -140,9 +140,9 @@ func (c *ClientConnection) Execute(ctx context.Context, cmd *pb.Connection) (*pb
 		return nil, ErrConnectionClosed
 	case <-ctx.Done():
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return &pb.ConnectionResult{
-				ConnectionId: cmd.Id,
-				Status:       pb.ConnectionResult_STATUS_TIMEOUT,
+			return &pb.TaskResult{
+				TaskId: cmd.Id,
+				Status:       pb.TaskResult_STATUS_TIMEOUT,
 				Error:        "command timed out",
 			}, nil
 		}
@@ -150,12 +150,12 @@ func (c *ClientConnection) Execute(ctx context.Context, cmd *pb.Connection) (*pb
 	}
 }
 
-// HandleResult доставляет ConnectionResult ждущему Execute.
-func (c *ClientConnection) HandleResult(res *pb.ConnectionResult) {
+// HandleResult доставляет TaskResult ждущему Execute.
+func (c *ClientConnection) HandleResult(res *pb.TaskResult) {
 	c.mu.Lock()
-	ch, ok := c.pending[res.ConnectionId]
+	ch, ok := c.pending[res.TaskId]
 	if ok {
-		delete(c.pending, res.ConnectionId)
+		delete(c.pending, res.TaskId)
 	}
 	c.mu.Unlock()
 	if ok {
@@ -170,9 +170,9 @@ func (c *ClientConnection) close() {
 	defer c.mu.Unlock()
 	for id, ch := range c.pending {
 		delete(c.pending, id)
-		ch <- &pb.ConnectionResult{
-			ConnectionId: id,
-			Status:       pb.ConnectionResult_STATUS_ERROR,
+		ch <- &pb.TaskResult{
+			TaskId: id,
+			Status:       pb.TaskResult_STATUS_ERROR,
 			Error:        "connection closed",
 		}
 	}
