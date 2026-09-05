@@ -7,8 +7,8 @@ import (
 
 	"google.golang.org/grpc"
 
-	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connectionPool"
-	connectionserver "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connectionServer"
+	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/pool"
+	connectionserver "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/server"
 	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
 	"github.com/joho/godotenv"
 )
@@ -16,7 +16,7 @@ import (
 func main() {
 	_ = godotenv.Load()
 
-	addr := os.Getenv("AKIRA_LISTEN")
+	addr := os.Getenv("LISTEN")
 	if addr == "" {
 		addr = ":5000"
 	}

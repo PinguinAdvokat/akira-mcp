@@ -3,7 +3,7 @@ package connectionserver
 import (
 	"io"
 
-	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connectionPool"
+	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/pool"
 	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
