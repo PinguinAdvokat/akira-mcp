@@ -1,4 +1,4 @@
-package connection
+package connectionserver
 
 import (
 	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
