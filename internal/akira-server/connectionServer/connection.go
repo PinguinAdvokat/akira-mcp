@@ -24,11 +24,11 @@ func New(pool *connectionpool.ConnectionPool) *ConnectionServer {
 
 func (s *ConnectionServer) Connect(stream pb.ConnectionService_ConnectServer) error {
 	// Первое сообщение обязано быть RegisterRequest.
-	first, err := stream.Recv()
+	firstMsg, err := stream.Recv()
 	if err != nil {
 		return err
 	}
-	reg := first.GetRegister()
+	reg := firstMsg.GetRegister()
 	if reg == nil || reg.ClientId == "" {
 		return status.Error(codes.InvalidArgument, "first message must be RegisterRequest with client_id")
 	}
@@ -71,12 +71,12 @@ func (s *ConnectionServer) Connect(stream pb.ConnectionService_ConnectServer) er
 			}
 			return err
 		}
-		switch p := msg.Payload.(type) {
+		switch payload := msg.Payload.(type) {
 		case *pb.ClientMessage_Result:
-			conn.HandleResult(p.Result)
+			conn.HandleResult(payload.Result)
 		case *pb.ClientMessage_Ping:
 			_ = conn.Post(&pb.ServerMessage{
-				Payload: &pb.ServerMessage_Pong{Pong: &pb.Pong{Seq: p.Ping.Seq}},
+				Payload: &pb.ServerMessage_Pong{Pong: &pb.Pong{Seq: payload.Ping.Seq}},
 			})
 		case *pb.ClientMessage_Register:
 			return status.Error(codes.InvalidArgument, "duplicate register")

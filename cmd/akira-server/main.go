@@ -7,10 +7,10 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/joho/godotenv"
 	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connectionPool"
 	connectionserver "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connectionServer"
 	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -26,8 +26,8 @@ func main() {
 		log.Fatalf("listen %s: %v", addr, err)
 	}
 
-	// Пул активных подключений: через pool.SendCommand любые объекты
-	// сервера отправляют команды клиентам по id подключения.
+	// Пул активных подключений: через pool.SendTask любые объекты
+	// сервера отправляют задачи клиентам по id подключения.
 	pool := connectionpool.New()
 
 	grpcServer := grpc.NewServer()
