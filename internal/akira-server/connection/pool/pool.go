@@ -2,6 +2,7 @@ package connectionpool
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection"
@@ -44,6 +45,26 @@ func (p *ConnectionPool) Unregister(conn *client.ClientConnection) {
 	delete(p.conns, conn.ClientID)
 	p.mu.Unlock()
 	conn.Close()
+}
+
+// ClientIDs возвращает отсортированный список id подключённых клиентов.
+func (p *ConnectionPool) ClientIDs() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	ids := make([]string, 0, len(p.conns))
+	for id := range p.conns {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// Has сообщает, подключён ли клиент с данным client_id.
+func (p *ConnectionPool) Has(clientID string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	_, ok := p.conns[clientID]
+	return ok
 }
 
 // SendTask отправляет задачу клиенту с id clientID и ждёт
