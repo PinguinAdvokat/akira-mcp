@@ -9,7 +9,9 @@ import (
 // и очередь исходящих сообщений для одностороннего потока Connect.
 // Корреляция результатов с задачами живёт в пуле (см. connectionpool):
 // результаты приходят отдельным методом SubmitResult и маршрутизируются
-// по task_id, а не по этому подключению.
+// по task_id, а не по этому подключению. Закрытие подключения (Close)
+// не прерывает ожидающие задачи — их результаты будут доставлены после
+// переподключения клиента.
 type ClientConnection struct {
 	ClientID  string
 	SessionID string
@@ -28,11 +30,9 @@ func New(clientID string) *ClientConnection {
 }
 
 // Out — канал исходящих сообщений; сервер вычитывает их
-// и пишет в gRPC stream (единственный писатель).
+// и пишет в gRPC stream (единственный писатель). При закрытии
+// подключения канал закрывается.
 func (c *ClientConnection) Out() <-chan *pb.ServerMessage { return c.out }
-
-// Done закрывается при закрытии подключения.
-func (c *ClientConnection) Done() <-chan struct{} { return c.done }
 
 // Post ставит сообщение в очередь на отправку клиенту.
 func (c *ClientConnection) Post(msg *pb.ServerMessage) error {

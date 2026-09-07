@@ -101,8 +101,9 @@ func TestExecTask(t *testing.T) {
 }
 
 // TestTaskSurvivesDisconnect проверяет, что при разрыве соединения
-// выполняемая задача не прерывается: процесс дописывает файл,
-// хотя соединение уже закрыто.
+// во время исполнения долгой задачи задача не прерывается, а её
+// результат сохраняется на клиенте и доставляется серверу после
+// переподключения — ждущий SendTask получает STATUS_OK.
 func TestTaskSurvivesDisconnect(t *testing.T) {
 	pool, addr := startServer(t)
 
@@ -110,11 +111,18 @@ func TestTaskSurvivesDisconnect(t *testing.T) {
 	cmd := "sleep 1 && echo done > " + marker
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = Run(ctx, Config{ServerAddr: addr, ClientID: testClientID}) }()
+	defer cancel()
+	go func() {
+		_ = Run(ctx, Config{
+			ServerAddr: addr,
+			ClientID:   testClientID,
+			RetryDelay: 100 * time.Millisecond,
+		})
+	}()
 	waitRegistered(t, pool)
 
 	// Задача уходит клиенту; ждём, пока она начнёт исполняться,
-	// затем рвём соединение со стороны клиента.
+	// затем рвём соединение со стороны сервера.
 	resCh := make(chan *pb.TaskResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
@@ -125,34 +133,31 @@ func TestTaskSurvivesDisconnect(t *testing.T) {
 		errCh <- err
 	}()
 	time.Sleep(300 * time.Millisecond)
-	cancel()
+	if !pool.Disconnect(testClientID) {
+		t.Fatal("client was not connected at disconnect")
+	}
 
-	// Сервер будит ждущий SendTask: либо результатом STATUS_ERROR,
-	// либо ошибкой разрыва соединения.
+	// Клиент переподключается и доставляет сохранённый результат.
 	select {
 	case res := <-resCh:
 		err := <-errCh
-		if err == nil && res.Status != pb.TaskResult_STATUS_ERROR {
-			t.Fatalf("expected STATUS_ERROR after disconnect, got: %v", res.Status)
+		if err != nil {
+			t.Fatalf("send task: %v", err)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("SendTask did not return after the connection was lost")
+		if res.Status != pb.TaskResult_STATUS_OK {
+			t.Fatalf("status = %v, want STATUS_OK after reconnect (error: %s)", res.Status, res.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("result was not delivered after reconnect")
 	}
 
-	// Задача не прервалась: процесс дописал файл уже без соединения.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		data, err := os.ReadFile(marker)
-		if err == nil {
-			if string(data) != "done\n" {
-				t.Fatalf("marker content = %q, want %q", data, "done\n")
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("task was interrupted by the disconnect: marker not created")
-		}
-		time.Sleep(50 * time.Millisecond)
+	// Задача не прерывалась: процесс дописал файл.
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("marker not created: %v", err)
+	}
+	if string(data) != "done\n" {
+		t.Fatalf("marker content = %q, want %q", data, "done\n")
 	}
 }
 

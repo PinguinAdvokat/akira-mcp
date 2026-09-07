@@ -64,17 +64,18 @@ func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.Connection
 
 	// Единственный писатель stream: исходящие сообщения из conn.Out()
 	// сериализуются в поток (параллельные Send в один stream запрещены).
+	// Закрытие Out (Unregister/Disconnect) завершает цикл.
 	for {
 		select {
-		case msg := <-conn.Out():
+		case msg, ok := <-conn.Out():
+			if !ok {
+				return nil
+			}
 			if err := stream.Send(msg); err != nil {
 				// Разрыв stream — завершаем handler, пул снимет подключение.
 				logger.Warn("stream send failed", "err", err)
 				return nil
 			}
-		case <-conn.Done():
-			// Подключение закрыто (Unregister) — завершаем handler.
-			return nil
 		case <-stream.Context().Done():
 			return nil
 		}

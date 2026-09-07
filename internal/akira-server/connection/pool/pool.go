@@ -13,28 +13,22 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// pendingTask — ждущая результата задача: подключение, которому
-// отправлена задача, и канал для доставки TaskResult.
-type pendingTask struct {
-	conn *client.ClientConnection
-	ch   chan *pb.TaskResult
-}
-
 // ConnectionPool хранит активные подключения клиентов по client_id
 // и реестр задач, ожидающих результат, по task_id. Через SendTask
-// любые объекты сервера могут отправлять задачи на исполнение клиенту
-// по id подключения; результаты приходят через SubmitResult
-// и маршрутизируются по task_id.
+// любые объекты сервера могут отправлять задачи на исполнение клиенту;
+// результаты приходят через SubmitResult и маршрутизируются по task_id.
+// Ожидание результата переживает разрыв соединения: клиент
+// переподключается с тем же client_id и доставляет результат.
 type ConnectionPool struct {
 	mu      sync.RWMutex
 	conns   map[string]*client.ClientConnection
-	pending map[string]*pendingTask
+	pending map[string]chan *pb.TaskResult
 }
 
 func New() *ConnectionPool {
 	return &ConnectionPool{
 		conns:   make(map[string]*client.ClientConnection),
-		pending: make(map[string]*pendingTask),
+		pending: make(map[string]chan *pb.TaskResult),
 	}
 }
 
@@ -51,9 +45,10 @@ func (p *ConnectionPool) Register(clientID string) (*client.ClientConnection, er
 	return c, nil
 }
 
-// Unregister убирает подключение из пула, будит ждущие SendTask
-// результатом STATUS_ERROR и удаляет их из реестра pending.
-// Если в пуле уже лежит другое, более новое подключение — пропускает.
+// Unregister убирает подключение из пула. Ожидающие результаты задачи
+// не прерываются: клиент переподключится с тем же client_id и доставит
+// результаты через SubmitResult. Если в пуле уже другое, более новое
+// подключение — пропускает (гонка переподключения).
 func (p *ConnectionPool) Unregister(conn *client.ClientConnection) {
 	p.mu.Lock()
 	if p.conns[conn.ClientID] != conn {
@@ -61,32 +56,38 @@ func (p *ConnectionPool) Unregister(conn *client.ClientConnection) {
 		return
 	}
 	delete(p.conns, conn.ClientID)
-	for id, pt := range p.pending {
-		if pt.conn == conn {
-			delete(p.pending, id)
-			pt.ch <- &pb.TaskResult{
-				TaskId: id,
-				Status: pb.TaskResult_STATUS_ERROR,
-				Error:  "connection closed",
-			}
-		}
-	}
 	p.mu.Unlock()
 	conn.Close()
 }
 
+// Disconnect разрывает текущее подключение клиента: подключение
+// убирается из пула, поток Connect завершается, клиент переподключится.
+// Ожидающие результаты задачи не прерываются. Возвращает false,
+// если клиент не подключен.
+func (p *ConnectionPool) Disconnect(clientID string) bool {
+	p.mu.RLock()
+	c := p.conns[clientID]
+	p.mu.RUnlock()
+	if c == nil {
+		return false
+	}
+	p.Unregister(c)
+	return true
+}
+
 // HandleResult доставляет TaskResult (поступивший через SubmitResult)
-// ждущему SendTask по task_id. Результат задачи, которой никто
-// не ждёт (например, истёк таймаут), молча отбрасывается.
+// ждущему SendTask по task_id — в том числе после переподключения
+// клиента. Результат задачи, которой никто не ждёт (например, истёк
+// таймаут), молча отбрасывается.
 func (p *ConnectionPool) HandleResult(res *pb.TaskResult) {
 	p.mu.Lock()
-	pt, ok := p.pending[res.TaskId]
+	ch, ok := p.pending[res.TaskId]
 	if ok {
 		delete(p.pending, res.TaskId)
 	}
 	p.mu.Unlock()
 	if ok {
-		pt.ch <- res
+		ch <- res
 	}
 }
 
@@ -111,8 +112,10 @@ func (p *ConnectionPool) Has(clientID string) bool {
 }
 
 // SendTask отправляет задачу клиенту с id clientID и блокируется
-// до результата (SubmitResult), закрытия соединения, таймаута задачи
-// или отмены ctx.
+// до результата, таймаута задачи или отмены ctx. Разрыв соединения
+// не прерывает ожидание: клиент переподключится и доставит результат.
+// Если сообщение о задаче не успело уйти до разрыва, ожидание
+// завершится по таймауту или отмене ctx.
 func (p *ConnectionPool) SendTask(ctx context.Context, clientID string, task *pb.Task) (*pb.TaskResult, error) {
 	p.mu.RLock()
 	c := p.conns[clientID]
@@ -129,7 +132,7 @@ func (p *ConnectionPool) SendTask(ctx context.Context, clientID string, task *pb
 
 	ch := make(chan *pb.TaskResult, 1)
 	p.mu.Lock()
-	p.pending[task.Id] = &pendingTask{conn: c, ch: ch}
+	p.pending[task.Id] = ch
 	p.mu.Unlock()
 	defer func() {
 		p.mu.Lock()
@@ -152,8 +155,6 @@ func (p *ConnectionPool) SendTask(ctx context.Context, clientID string, task *pb
 	select {
 	case res := <-ch:
 		return res, nil
-	case <-c.Done():
-		return nil, connection.ErrConnectionClosed
 	case <-ctx.Done():
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return &pb.TaskResult{

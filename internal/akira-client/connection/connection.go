@@ -1,6 +1,6 @@
 // Package connection содержит логику подключения akira-client к серверу:
-// установление соединения, регистрацию, heartbeat и переподключение
-// после разрывов.
+// установление соединения, регистрацию, heartbeat, возврат результатов
+// задач и переподключение после разрывов.
 package connection
 
 import (
@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -55,9 +56,15 @@ func Run(ctx context.Context, cfg Config) error {
 	defer conn.Close()
 	client := pb.NewConnectionServiceClient(conn)
 
+	// outbox живёт на уровне Run, а не сессии: результаты задач,
+	// завершившихся во время разрыва соединения, хранятся в очереди
+	// и доставляются после переподключения.
+	ob := newOutbox()
+	go submitLoop(ctx, client, ob, retry)
+
 	log.Printf("connecting to %s, client_id=%s", cfg.ServerAddr, cfg.ClientID)
 	for {
-		if err := runSession(ctx, client, cfg.ClientID); err != nil && ctx.Err() == nil {
+		if err := runSession(ctx, client, cfg.ClientID, ob); err != nil && ctx.Err() == nil {
 			log.Printf("connection lost: %v; reconnecting in %s", err, retry)
 		}
 		select {
@@ -70,7 +77,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 // runSession устанавливает подключение, регистрируется с client_id
 // и обслуживает поток до разрыва или отмены ctx.
-func runSession(ctx context.Context, client pb.ConnectionServiceClient, clientID string) error {
+func runSession(ctx context.Context, client pb.ConnectionServiceClient, clientID string, ob *outbox) error {
 	// Регистрация выполняется самим запросом Connect; сервер присылает
 	// RegisterResponse первым сообщением одностороннего потока.
 	stream, err := client.Connect(ctx, &pb.RegisterRequest{
@@ -92,7 +99,11 @@ func runSession(ctx context.Context, client pb.ConnectionServiceClient, clientID
 	}
 	log.Printf("registered: session_id=%s", ack.SessionId)
 
-	go heartbeat(ctx, client, ack.HeartbeatIntervalMs)
+	// Heartbeat живёт, пока жива сессия: при выходе из runSession
+	// горутина останавливается.
+	sctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go heartbeat(sctx, client, ack.HeartbeatIntervalMs)
 
 	// Приём задач: исполнение запускается в отдельной горутине,
 	// чтобы разрыв соединения не прерывал выполняемые задачи.
@@ -102,22 +113,19 @@ func runSession(ctx context.Context, client pb.ConnectionServiceClient, clientID
 			return fmt.Errorf("recv: %w", err)
 		}
 		if task := msg.GetTask(); task != nil {
-			go runTask(ctx, client, task)
+			go runTask(task, ob)
 		}
 	}
 }
 
-// runTask исполняет задачу и отправляет результат через SubmitResult.
-// Задача продолжает исполняться при разрыве соединения; если результат
-// доставить уже некуда — это логируется.
-func runTask(ctx context.Context, client pb.ConnectionServiceClient, task *pb.Task) {
-	res := executor.Execute(task)
-	if _, err := client.SubmitResult(ctx, res); err != nil {
-		log.Printf("task %s finished, but its result was not delivered: %v", task.Id, err)
-	}
+// runTask исполняет задачу и кладёт результат в outbox. Задача
+// продолжает исполняться при разрыве соединения; результат хранится
+// в outbox до успешной доставки — переживая переподключение.
+func runTask(task *pb.Task, ob *outbox) {
+	ob.push(executor.Execute(task))
 }
 
-// heartbeat периодически вызывает Ping, чтобы сервер видел,
+// heartbeat периодически вызывает Heartbeat, чтобы сервер видел,
 // что клиент жив.
 func heartbeat(ctx context.Context, client pb.ConnectionServiceClient, intervalMs int64) {
 	if intervalMs <= 0 {
@@ -131,10 +139,99 @@ func heartbeat(ctx context.Context, client pb.ConnectionServiceClient, intervalM
 		case <-ticker.C:
 			seq++
 			if _, err := client.Heartbeat(ctx, &pb.Ping{Seq: seq}); err != nil {
-				log.Printf("ping failed: %v", err)
+				log.Printf("heartbeat failed: %v", err)
 			}
 		case <-ctx.Done():
 			return
+		}
+	}
+}
+
+// outbox — накопитель результатов задач. Очередь не ограничена:
+// пока соединения нет, сервер не присылает новые задачи, так что
+// в очереди оказываются только результаты уже выполняющихся задач.
+type outbox struct {
+	mu     sync.Mutex
+	queue  []*pb.TaskResult
+	notify chan struct{}
+}
+
+func newOutbox() *outbox {
+	return &outbox{notify: make(chan struct{}, 1)}
+}
+
+// push добавляет результат и будит доставщика.
+func (o *outbox) push(res *pb.TaskResult) {
+	o.mu.Lock()
+	o.queue = append(o.queue, res)
+	o.mu.Unlock()
+	o.wake()
+}
+
+// wake сигнализирует доставщику (не блокируется).
+func (o *outbox) wake() {
+	select {
+	case o.notify <- struct{}{}:
+	default:
+	}
+}
+
+// peek возвращает первый результат очереди, не извлекая его.
+func (o *outbox) peek() (*pb.TaskResult, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.queue) == 0 {
+		return nil, false
+	}
+	return o.queue[0], true
+}
+
+// pop извлекает первый результат очереди.
+func (o *outbox) pop() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.queue = o.queue[1:]
+}
+
+// len возвращает размер очереди.
+func (o *outbox) len() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.queue)
+}
+
+// submitLoop доставляет результаты из outbox на сервер через
+// SubmitResult. При ошибке (нет соединения) результат остаётся
+// в очереди, и попытка повторяется через retry — так результат
+// доживает до переподключения и доставляется по нему.
+func submitLoop(ctx context.Context, client pb.ConnectionServiceClient, ob *outbox, retry time.Duration) {
+	for {
+		select {
+		case <-ctx.Done():
+			if n := ob.len(); n > 0 {
+				log.Printf("client stopped, dropping %d undelivered results", n)
+			}
+			return
+		case <-ob.notify:
+		}
+		for {
+			res, ok := ob.peek()
+			if !ok {
+				break
+			}
+			if _, err := client.SubmitResult(ctx, res); err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				log.Printf("result for task %s not delivered: %v; will retry in %s", res.TaskId, err, retry)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(retry):
+				}
+				continue
+			}
+			ob.pop()
 		}
 	}
 }
