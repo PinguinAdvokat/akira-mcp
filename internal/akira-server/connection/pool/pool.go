@@ -27,8 +27,9 @@ type pendingEntry struct {
 // и реестр задач, ожидающих результат, по task_id. Через SendTask
 // любые объекты сервера могут отправлять задачи на исполнение клиенту;
 // результаты приходят через SubmitResult и маршрутизируются по task_id.
-// Ожидание результата переживает разрыв соединения: клиент
-// переподключается с тем же client_id и доставляет результат.
+// Ожидание результата не переживает разрыв соединения: при потере
+// подключения все задачи клиента завершаются ошибкой ErrConnectionClosed —
+// и отправленные, и не успевшие уйти.
 type ConnectionPool struct {
 	mu      sync.RWMutex
 	conns   map[string]*client.ClientConnection
@@ -55,29 +56,35 @@ func (p *ConnectionPool) Register(clientID string) (*client.ClientConnection, er
 	return c, nil
 }
 
-// Unregister убирает подключение из пула. Ожидающие результаты задачи
-// не прерываются: клиент переподключится с тем же client_id и доставит
-// результаты через SubmitResult. Если в пуле уже другое, более новое
-// подключение — пропускает (гонка переподключения). Задачи, сообщения
-// о которых ещё не ушли клиенту, завершаются ошибкой ErrConnectionClosed:
-// результата по ним не будет никогда.
+// Unregister убирает подключение из пула и завершает ошибкой
+// ErrConnectionClosed ожидание всех задач клиента — результата по ним
+// можно не ждать, даже если клиент переподключится: переподключение
+// не пересылает уже отправленные задачи заново. Если в пуле уже другое,
+// более новое подключение (гонка переподключения) — только завершает
+// задачи, сообщения о которых не ушли из очереди старого подключения:
+// клиент на связи, и отправленные ему задачи могут ещё доставить результат.
 func (p *ConnectionPool) Unregister(conn *client.ClientConnection) {
 	p.mu.Lock()
-	if p.conns[conn.ClientID] != conn {
+	cur, ok := p.conns[conn.ClientID]
+	if !ok || cur != conn {
 		p.mu.Unlock()
+		if ok {
+			p.failUnsent(conn.Close())
+		}
 		return
 	}
 	delete(p.conns, conn.ClientID)
 	p.mu.Unlock()
-	p.failUnsent(conn.Close())
+	conn.Close()
+	p.failPendingClient(conn.ClientID)
 }
 
 // Disconnect разрывает текущее подключение клиента: атомарно убирает
 // его из пула (за одну блокировку — между чтением и удалением подключение
 // не успеет смениться на новое при переподключении), завершает поток
 // Connect и возвращает true. Возвращает false, если клиент не подключен.
-// Задачи, не ушедшие клиенту, завершаются ошибкой; уже отправленные
-// задачи продолжают ждать результата после переподключения клиента.
+// Все задачи клиента (и отправленные, и не ушедшие) завершаются ошибкой
+// ErrConnectionClosed.
 func (p *ConnectionPool) Disconnect(clientID string) bool {
 	p.mu.Lock()
 	c, ok := p.conns[clientID]
@@ -88,7 +95,8 @@ func (p *ConnectionPool) Disconnect(clientID string) bool {
 	if !ok {
 		return false
 	}
-	p.failUnsent(c.Close())
+	c.Close()
+	p.failPendingClient(clientID)
 	return true
 }
 
@@ -115,6 +123,26 @@ func (p *ConnectionPool) failUnsent(msgs []*pb.ServerMessage) {
 		if task := msg.GetTask(); task != nil {
 			p.FailTask(task.GetId())
 		}
+	}
+}
+
+// failPendingClient завершает ошибкой ErrConnectionClosed ожидание всех
+// задач клиента clientID — и отправленных, и оставшихся в очереди.
+// Вызывается при потере подключения: клиент может не вернуться (или не
+// получить часть задач из-за «полумёртвого» канала), и без этого
+// задачи без таймаута ждали бы результата неограниченно долго.
+func (p *ConnectionPool) failPendingClient(clientID string) {
+	p.mu.Lock()
+	var entries []*pendingEntry
+	for id, e := range p.pending {
+		if e.owner == clientID {
+			delete(p.pending, id)
+			entries = append(entries, e)
+		}
+	}
+	p.mu.Unlock()
+	for _, e := range entries {
+		e.errCh <- connection.ErrConnectionClosed
 	}
 }
 
@@ -164,13 +192,12 @@ func (p *ConnectionPool) Has(clientID string) bool {
 // SendTask отправляет задачу клиенту с id clientID и блокируется
 // до результата, таймаута задачи или отмены ctx.
 //
-// Если сообщение о задаче не успело уйти до закрытия подключения,
-// возвращается ErrConnectionClosed. Если задача уже ушла клиенту,
-// разрыв соединения не прерывает ожидание: клиент переподключится
-// и доставит результат. Задача с TimeoutMs == 0 при ctx без дедлайна
-// может ждать неограниченно долго (клиент не вернулся — результата
-// не будет): вызывающий код должен задавать таймаут задачи или
-// дедлайн ctx.
+// Потеря подключения клиента завершает ожидание ошибкой
+// ErrConnectionClosed — независимо от того, ушло сообщение клиенту
+// или нет: переподключение не пересылает задачи заново, и результата
+// можно не ждать. Задача без таймаута (TimeoutMs == 0) при живом
+// подключении и ctx без дедлайна ждёт результата неограниченно долго —
+// вызывающий код должен задавать таймаут задачи или дедлайн ctx.
 //
 // Таймаут задачи (task.timeout_ms) возвращается как TaskResult
 // со статусом STATUS_TIMEOUT и nil error; истечение дедлайна или отмена

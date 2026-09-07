@@ -84,8 +84,8 @@ func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.Connection
 	// Единственный писатель stream: исходящие сообщения из conn.Out()
 	// сериализуются в поток (параллельные Send в один stream запрещены).
 	// Закрытие подключения (Unregister/Disconnect) закрывает Done() —
-	// цикл завершается, не отправляя сообщения из очереди: их ожидание
-	// пул завершает ошибкой ErrConnectionClosed.
+	// цикл завершается, не отправляя сообщения из очереди; пул при этом
+	// завершает ошибкой ErrConnectionClosed все задачи клиента.
 	for {
 		select {
 		case msg := <-conn.Out():
@@ -93,10 +93,7 @@ func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.Connection
 			case <-conn.Done():
 				// Подключение закрылось, пока сообщение было в очереди, —
 				// не отправляем: отключённый клиент не должен получать
-				// задачи. Ожидание задачи завершаем ошибкой.
-				if task := msg.GetTask(); task != nil {
-					s.pool.FailTask(task.GetId())
-				}
+				// задачи. Ожидание задач завершит пул (failPendingClient).
 				return nil
 			default:
 			}

@@ -49,6 +49,42 @@ func TestSendTaskFailsWhenTaskNeverSent(t *testing.T) {
 	}
 }
 
+// TestSendTaskFailsWhenTaskSent: задача успела уйти клиенту (писатель
+// забрал сообщение из очереди), но подключение потеряно — SendTask
+// возвращает ErrConnectionClosed, а не ждёт результата вечно.
+func TestSendTaskFailsWhenTaskSent(t *testing.T) {
+	pool := New()
+	conn, err := pool.Register("c1")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := pool.SendTask(context.Background(), "c1", execTask("sent-task"))
+		done <- err
+	}()
+
+	// Писатель потока забирает сообщение из очереди — задача «ушла»
+	// клиенту, SendTask ждёт результата.
+	select {
+	case <-conn.Out():
+	case <-time.After(time.Second):
+		t.Fatal("task message was not queued")
+	}
+
+	// Подключение потеряно — результата можно не ждать.
+	pool.Disconnect("c1")
+	select {
+	case err := <-done:
+		if !errors.Is(err, connection.ErrConnectionClosed) {
+			t.Fatalf("SendTask error = %v, want ErrConnectionClosed", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SendTask did not return after the connection was lost")
+	}
+}
+
 // TestSendTaskDuplicateID: повторная отправка задачи с тем же task_id,
 // пока первая ждёт результата, возвращает ErrTaskAlreadyPending
 // и не затирает ожидание первой.

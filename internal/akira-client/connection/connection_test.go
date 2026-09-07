@@ -2,12 +2,14 @@ package connection
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	akiraconnection "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection"
 	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/pool"
 	connectionserver "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/server"
 	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
@@ -84,11 +86,13 @@ func TestExecTask(t *testing.T) {
 	}
 }
 
-// TestTaskSurvivesDisconnect проверяет, что при разрыве соединения
-// во время исполнения долгой задачи задача не прерывается, а её
-// результат сохраняется на клиенте и доставляется серверу после
-// переподключения — ждущий SendTask получает STATUS_OK.
-func TestTaskSurvivesDisconnect(t *testing.T) {
+// TestDisconnectFailsPendingTask: при разрыве соединения во время
+// исполнения долгой задачи ждущий SendTask получает ErrConnectionClosed
+// (результата можно не ждать), при этом задача на клиенте не прерывается
+// и дописывает маркерный файл. После переподключения клиент доставляет
+// сохранённый результат — сервер отбрасывает его молча (никто не ждёт),
+// и новые задачи исполняются.
+func TestDisconnectFailsPendingTask(t *testing.T) {
 	pool, addr := startServer(t)
 
 	marker := filepath.Join(t.TempDir(), "marker")
@@ -121,27 +125,42 @@ func TestTaskSurvivesDisconnect(t *testing.T) {
 		t.Fatal("client was not connected at disconnect")
 	}
 
-	// Клиент переподключается и доставляет сохранённый результат.
+	// Ожидание задачи завершается ошибкой, а не висит вечно.
 	select {
-	case res := <-resCh:
-		err := <-errCh
-		if err != nil {
-			t.Fatalf("send task: %v", err)
+	case err := <-errCh:
+		if !errors.Is(err, akiraconnection.ErrConnectionClosed) {
+			t.Fatalf("send task error = %v, want ErrConnectionClosed", err)
 		}
-		if res.Status != pb.TaskResult_STATUS_OK {
-			t.Fatalf("status = %v, want STATUS_OK after reconnect (error: %s)", res.Status, res.Error)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("result was not delivered after reconnect")
+	case <-time.After(time.Second):
+		t.Fatal("SendTask did not return after the connection was lost")
 	}
 
-	// Задача не прерывалась: процесс дописал файл.
-	data, err := os.ReadFile(marker)
+	// Клиент переподключается и снова исполняет задачи.
+	waitRegistered(t, pool)
+	res, err := pool.SendTask(context.Background(), testClientID, &pb.Task{
+		Payload: &pb.Task_Exec{Exec: &pb.ExecTask{Cmd: "echo again"}},
+	})
 	if err != nil {
-		t.Fatalf("marker not created: %v", err)
+		t.Fatalf("send task after reconnect: %v", err)
 	}
-	if string(data) != "done\n" {
-		t.Fatalf("marker content = %q, want %q", data, "done\n")
+	if res.Status != pb.TaskResult_STATUS_OK {
+		t.Fatalf("status after reconnect = %v (error: %s)", res.Status, res.Error)
+	}
+
+	// Задача не прерывалась: процесс дописал файл (сохранённый результат
+	// доставлен после переподключения и отброшен сервером молча).
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if data, err := os.ReadFile(marker); err == nil {
+			if string(data) != "done\n" {
+				t.Fatalf("marker content = %q, want %q", data, "done\n")
+			}
+			break
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatal("marker not created within 5s: task was interrupted by disconnect")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
