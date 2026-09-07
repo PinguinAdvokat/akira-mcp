@@ -13,6 +13,16 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// pendingEntry — задача, ожидающая результат: SendTask ждёт resCh,
+// HandleResult доставляет результат в resCh, а ошибки ожидания
+// (задача не ушла клиенту) — в errCh. owner — client_id, которому
+// отправлена задача: по нему отбрасываются результаты от чужих клиентов.
+type pendingEntry struct {
+	resCh chan *pb.TaskResult
+	errCh chan error
+	owner string
+}
+
 // ConnectionPool хранит активные подключения клиентов по client_id
 // и реестр задач, ожидающих результат, по task_id. Через SendTask
 // любые объекты сервера могут отправлять задачи на исполнение клиенту;
@@ -22,13 +32,13 @@ import (
 type ConnectionPool struct {
 	mu      sync.RWMutex
 	conns   map[string]*client.ClientConnection
-	pending map[string]chan *pb.TaskResult
+	pending map[string]*pendingEntry
 }
 
 func New() *ConnectionPool {
 	return &ConnectionPool{
 		conns:   make(map[string]*client.ClientConnection),
-		pending: make(map[string]chan *pb.TaskResult),
+		pending: make(map[string]*pendingEntry),
 	}
 }
 
@@ -48,7 +58,9 @@ func (p *ConnectionPool) Register(clientID string) (*client.ClientConnection, er
 // Unregister убирает подключение из пула. Ожидающие результаты задачи
 // не прерываются: клиент переподключится с тем же client_id и доставит
 // результаты через SubmitResult. Если в пуле уже другое, более новое
-// подключение — пропускает (гонка переподключения).
+// подключение — пропускает (гонка переподключения). Задачи, сообщения
+// о которых ещё не ушли клиенту, завершаются ошибкой ErrConnectionClosed:
+// результата по ним не будет никогда.
 func (p *ConnectionPool) Unregister(conn *client.ClientConnection) {
 	p.mu.Lock()
 	if p.conns[conn.ClientID] != conn {
@@ -57,38 +69,76 @@ func (p *ConnectionPool) Unregister(conn *client.ClientConnection) {
 	}
 	delete(p.conns, conn.ClientID)
 	p.mu.Unlock()
-	conn.Close()
+	p.failUnsent(conn.Close())
 }
 
-// Disconnect разрывает текущее подключение клиента: подключение
-// убирается из пула, поток Connect завершается, клиент переподключится.
-// Ожидающие результаты задачи не прерываются. Возвращает false,
-// если клиент не подключен.
+// Disconnect разрывает текущее подключение клиента: атомарно убирает
+// его из пула (за одну блокировку — между чтением и удалением подключение
+// не успеет смениться на новое при переподключении), завершает поток
+// Connect и возвращает true. Возвращает false, если клиент не подключен.
+// Задачи, не ушедшие клиенту, завершаются ошибкой; уже отправленные
+// задачи продолжают ждать результата после переподключения клиента.
 func (p *ConnectionPool) Disconnect(clientID string) bool {
-	p.mu.RLock()
-	c := p.conns[clientID]
-	p.mu.RUnlock()
-	if c == nil {
+	p.mu.Lock()
+	c, ok := p.conns[clientID]
+	if ok {
+		delete(p.conns, clientID)
+	}
+	p.mu.Unlock()
+	if !ok {
 		return false
 	}
-	p.Unregister(c)
+	p.failUnsent(c.Close())
 	return true
+}
+
+// FailTask завершает ошибкой ErrConnectionClosed ожидание задачи:
+// сообщение о ней не будет отправлено клиенту (например, подключение
+// закрылось, пока сообщение было в очереди на отправку).
+func (p *ConnectionPool) FailTask(taskID string) {
+	p.mu.Lock()
+	e, ok := p.pending[taskID]
+	if ok {
+		delete(p.pending, taskID)
+	}
+	p.mu.Unlock()
+	if ok {
+		e.errCh <- connection.ErrConnectionClosed
+	}
+}
+
+// failUnsent завершает ошибкой ErrConnectionClosed ожидание задач,
+// сообщения о которых остались в очереди подключения при закрытии:
+// клиент их не получил и результата не пришлёт.
+func (p *ConnectionPool) failUnsent(msgs []*pb.ServerMessage) {
+	for _, msg := range msgs {
+		if task := msg.GetTask(); task != nil {
+			p.FailTask(task.GetId())
+		}
+	}
 }
 
 // HandleResult доставляет TaskResult (поступивший через SubmitResult)
 // ждущему SendTask по task_id — в том числе после переподключения
-// клиента. Результат задачи, которой никто не ждёт (например, истёк
-// таймаут), молча отбрасывается.
-func (p *ConnectionPool) HandleResult(res *pb.TaskResult) {
+// клиента. Результат от клиента, не являющегося владельцем задачи,
+// отбрасывается с ErrNotTaskOwner (ожидание продолжается — владелец
+// может доставить результат позже). Результат задачи, которой никто
+// не ждёт (например, истёк таймаут), отбрасывается молча.
+func (p *ConnectionPool) HandleResult(res *pb.TaskResult) error {
 	p.mu.Lock()
-	ch, ok := p.pending[res.TaskId]
+	e, ok := p.pending[res.TaskId]
+	if ok && res.ClientId != "" && res.ClientId != e.owner {
+		p.mu.Unlock()
+		return connection.ErrNotTaskOwner
+	}
 	if ok {
 		delete(p.pending, res.TaskId)
 	}
 	p.mu.Unlock()
 	if ok {
-		ch <- res
+		e.resCh <- res
 	}
+	return nil
 }
 
 // ClientIDs возвращает отсортированный список id подключённых клиентов.
@@ -112,10 +162,20 @@ func (p *ConnectionPool) Has(clientID string) bool {
 }
 
 // SendTask отправляет задачу клиенту с id clientID и блокируется
-// до результата, таймаута задачи или отмены ctx. Разрыв соединения
-// не прерывает ожидание: клиент переподключится и доставит результат.
-// Если сообщение о задаче не успело уйти до разрыва, ожидание
-// завершится по таймауту или отмене ctx.
+// до результата, таймаута задачи или отмены ctx.
+//
+// Если сообщение о задаче не успело уйти до закрытия подключения,
+// возвращается ErrConnectionClosed. Если задача уже ушла клиенту,
+// разрыв соединения не прерывает ожидание: клиент переподключится
+// и доставит результат. Задача с TimeoutMs == 0 при ctx без дедлайна
+// может ждать неограниченно долго (клиент не вернулся — результата
+// не будет): вызывающий код должен задавать таймаут задачи или
+// дедлайн ctx.
+//
+// Таймаут задачи (task.timeout_ms) возвращается как TaskResult
+// со статусом STATUS_TIMEOUT и nil error; истечение дедлайна или отмена
+// ctx вызывающего кода возвращаются как ошибка ctx. Повторный вызов
+// с task_id, уже ожидающим результат, возвращает ErrTaskAlreadyPending.
 func (p *ConnectionPool) SendTask(ctx context.Context, clientID string, task *pb.Task) (*pb.TaskResult, error) {
 	p.mu.RLock()
 	c := p.conns[clientID]
@@ -130,33 +190,53 @@ func (p *ConnectionPool) SendTask(ctx context.Context, clientID string, task *pb
 		task.CreatedAt = timestamppb.Now()
 	}
 
-	ch := make(chan *pb.TaskResult, 1)
+	e := &pendingEntry{
+		resCh: make(chan *pb.TaskResult, 1),
+		errCh: make(chan error, 1),
+		owner: clientID,
+	}
 	p.mu.Lock()
-	p.pending[task.Id] = ch
+	if _, exists := p.pending[task.Id]; exists {
+		p.mu.Unlock()
+		return nil, connection.ErrTaskAlreadyPending
+	}
+	p.pending[task.Id] = e
 	p.mu.Unlock()
 	defer func() {
 		p.mu.Lock()
-		delete(p.pending, task.Id)
+		// удаляем только свою запись: после таймаута под этим же id
+		// может ждать следующая попытка
+		if cur, ok := p.pending[task.Id]; ok && cur == e {
+			delete(p.pending, task.Id)
+		}
 		p.mu.Unlock()
 	}()
 
-	if err := c.Post(&pb.ServerMessage{
-		Payload: &pb.ServerMessage_Task{Task: task},
-	}); err != nil {
-		return nil, err
-	}
-
+	// Таймаут задачи действует и на постановку в очередь: если очередь
+	// подключения переполнена (писатель не вычитывает), Post прерывается
+	// по дедлайну, а не висит вечно.
+	parent := ctx
 	if task.TimeoutMs > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(task.TimeoutMs)*time.Millisecond)
 		defer cancel()
 	}
 
+	if err := c.Post(ctx, &pb.ServerMessage{
+		Payload: &pb.ServerMessage_Task{Task: task},
+	}); err != nil {
+		return nil, err
+	}
+
 	select {
-	case res := <-ch:
+	case res := <-e.resCh:
 		return res, nil
+	case err := <-e.errCh:
+		return nil, err
 	case <-ctx.Done():
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		// STATUS_TIMEOUT — только таймаут самой задачи: родительский ctx
+		// жив, значит дедлайн породил таймер задачи, а не вызывающий код.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) && parent.Err() == nil {
 			return &pb.TaskResult{
 				TaskId: task.Id,
 				Status: pb.TaskResult_STATUS_TIMEOUT,

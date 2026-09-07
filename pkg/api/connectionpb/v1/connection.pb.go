@@ -703,7 +703,11 @@ type TaskResult struct {
 	// error — текст ошибки при status = STATUS_ERROR.
 	Error string `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
 	// duration_ms — фактическое время исполнения.
-	DurationMs    int64 `protobuf:"varint,7,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	DurationMs int64 `protobuf:"varint,7,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	// client_id — идентификатор клиента, исполнившего задачу.
+	// Сервер сверяет его с владельцем ожидающей задачи; пустое значение
+	// принимается (совместимость со старыми клиентами).
+	ClientId      string `protobuf:"bytes,8,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -787,6 +791,13 @@ func (x *TaskResult) GetDurationMs() int64 {
 	return 0
 }
 
+func (x *TaskResult) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
 var File_connection_v1_connection_proto protoreflect.FileDescriptor
 
 const file_connection_v1_connection_proto_rawDesc = "" +
@@ -829,7 +840,7 @@ const file_connection_v1_connection_proto_rawDesc = "" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\fR\acontent\x12\x1f\n" +
 	"\vcreate_dirs\x18\x03 \x01(\bR\n" +
-	"createDirs\"\xd5\x02\n" +
+	"createDirs\"\xf2\x02\n" +
 	"\n" +
 	"TaskResult\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12>\n" +
@@ -839,7 +850,8 @@ const file_connection_v1_connection_proto_rawDesc = "" +
 	"\x06stderr\x18\x05 \x01(\fR\x06stderr\x12\x14\n" +
 	"\x05error\x18\x06 \x01(\tR\x05error\x12\x1f\n" +
 	"\vduration_ms\x18\a \x01(\x03R\n" +
-	"durationMs\"j\n" +
+	"durationMs\x12\x1b\n" +
+	"\tclient_id\x18\b \x01(\tR\bclientId\"j\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\r\n" +
 	"\tSTATUS_OK\x10\x01\x12\x10\n" +

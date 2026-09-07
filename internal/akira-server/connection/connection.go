@@ -13,6 +13,11 @@ var (
 	ErrConnectionNotFound = errors.New("connectionpool: connection not found")
 	// ErrConnectionClosed — подключение закрыто.
 	ErrConnectionClosed = errors.New("connectionpool: connection closed")
+	// ErrTaskAlreadyPending — задача с таким task_id уже ожидает результат.
+	ErrTaskAlreadyPending = errors.New("connectionpool: task id is already pending")
+	// ErrNotTaskOwner — результат прислал не тот клиент, которому
+	// отправлена задача.
+	ErrNotTaskOwner = errors.New("connectionpool: result submitted by a non-owner client")
 )
 
 // newID возвращает случайный hex-идентификатор (session_id / task id).

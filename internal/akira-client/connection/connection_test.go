@@ -2,16 +2,12 @@ package connection
 
 import (
 	"context"
-	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"google.golang.org/grpc"
-
-	connection "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection"
 	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/pool"
 	connectionserver "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/server"
 	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
@@ -27,8 +23,7 @@ func startServer(t *testing.T) (*connectionpool.ConnectionPool, string) {
 	t.Helper()
 
 	pool := connectionpool.New()
-	grpcServer := grpc.NewServer()
-	pb.RegisterConnectionServiceServer(grpcServer, connectionserver.New(pool))
+	grpcServer := connectionserver.NewGRPCServer(pool)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -40,18 +35,12 @@ func startServer(t *testing.T) (*connectionpool.ConnectionPool, string) {
 	return pool, lis.Addr().String()
 }
 
-// waitRegistered ждёт, пока клиент зарегистрируется, отправляя
-// пробную задачу.
+// waitRegistered ждёт, пока клиент зарегистрируется в пуле.
 func waitRegistered(t *testing.T, pool *connectionpool.ConnectionPool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		_, err := pool.SendTask(ctx, testClientID, &pb.Task{
-			Payload: &pb.Task_Exec{Exec: &pb.ExecTask{Cmd: "true"}},
-		})
-		cancel()
-		if err == nil {
+		if pool.Has(testClientID) {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -64,12 +53,7 @@ func waitUnregistered(t *testing.T, pool *connectionpool.ConnectionPool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		_, err := pool.SendTask(ctx, testClientID, &pb.Task{
-			Payload: &pb.Task_Exec{Exec: &pb.ExecTask{Cmd: "true"}},
-		})
-		cancel()
-		if errors.Is(err, connection.ErrConnectionNotFound) {
+		if !pool.Has(testClientID) {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)

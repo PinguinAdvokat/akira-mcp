@@ -3,11 +3,15 @@ package connectionserver
 import (
 	"context"
 	"log/slog"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 
 	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/pool"
 	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // HeartbeatIntervalMs — период вызова Heartbeat, сообщаемый клиенту
@@ -26,6 +30,21 @@ func New(pool *connectionpool.ConnectionPool) *ConnectionServer {
 		pool:   pool,
 		logger: slog.Default().With(slog.String("component", "connectionServer")),
 	}
+}
+
+// NewGRPCServer создаёт gRPC-сервер akira с параметрами keepalive
+// и зарегистрированным ConnectionService. Сервер пингует долгоживущие
+// потоки Connect: «полумёртвое» (half-open) TCP-соединение закрывается
+// примерно за Time+Timeout (~80с). Без этого призрачная регистрация
+// держала бы client_id до таймаута стека TCP (~15 минут) и блокировала
+// переподключение клиента ошибкой AlreadyExists.
+func NewGRPCServer(pool *connectionpool.ConnectionPool) *grpc.Server {
+	grpcServer := grpc.NewServer(grpc.KeepaliveParams(keepalive.ServerParameters{
+		Time:    60 * time.Second,
+		Timeout: 20 * time.Second,
+	}))
+	pb.RegisterConnectionServiceServer(grpcServer, New(pool))
+	return grpcServer
 }
 
 // Connect регистрирует клиента (самим запросом) и открывает
@@ -64,18 +83,31 @@ func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.Connection
 
 	// Единственный писатель stream: исходящие сообщения из conn.Out()
 	// сериализуются в поток (параллельные Send в один stream запрещены).
-	// Закрытие Out (Unregister/Disconnect) завершает цикл.
+	// Закрытие подключения (Unregister/Disconnect) закрывает Done() —
+	// цикл завершается, не отправляя сообщения из очереди: их ожидание
+	// пул завершает ошибкой ErrConnectionClosed.
 	for {
 		select {
-		case msg, ok := <-conn.Out():
-			if !ok {
+		case msg := <-conn.Out():
+			select {
+			case <-conn.Done():
+				// Подключение закрылось, пока сообщение было в очереди, —
+				// не отправляем: отключённый клиент не должен получать
+				// задачи. Ожидание задачи завершаем ошибкой.
+				if task := msg.GetTask(); task != nil {
+					s.pool.FailTask(task.GetId())
+				}
 				return nil
+			default:
 			}
 			if err := stream.Send(msg); err != nil {
-				// Разрыв stream — завершаем handler, пул снимет подключение.
+				// Разрыв stream — завершаем handler, пул снимет подключение
+				// и завершит ожидание недоставленных задач.
 				logger.Warn("stream send failed", "err", err)
 				return nil
 			}
+		case <-conn.Done():
+			return nil
 		case <-stream.Context().Done():
 			return nil
 		}
@@ -83,14 +115,18 @@ func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.Connection
 }
 
 // SubmitResult принимает результат исполнения задачи от клиента.
-// Сервер сопоставляет результат с ожидающей задачей по task_id.
+// Сервер сопоставляет результат с ожидающей задачей по task_id;
+// результат от клиента, не являющегося владельцем задачи, отклоняется.
 func (s *ConnectionServer) SubmitResult(ctx context.Context, res *pb.TaskResult) (*pb.SubmitResultResponse, error) {
 	if res == nil || res.TaskId == "" {
 		return nil, status.Error(codes.InvalidArgument, "result must have task_id")
 	}
 	// Результат задачи, которой никто не ждёт, отбрасывается молча —
 	// нормальная ситуация после таймаута на стороне сервера.
-	s.pool.HandleResult(res)
+	if err := s.pool.HandleResult(res); err != nil {
+		s.logger.Warn("result rejected", "task_id", res.TaskId, "client_id", res.ClientId, "err", err)
+		return nil, status.Error(codes.PermissionDenied, err.Error())
+	}
 	return &pb.SubmitResultResponse{}, nil
 }
 

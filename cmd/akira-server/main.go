@@ -6,11 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"google.golang.org/grpc"
-
 	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/pool"
 	connectionserver "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/server"
-	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
 	"github.com/joho/godotenv"
 )
 
@@ -66,8 +63,9 @@ func main() {
 	// сервера отправляют задачи клиентам по id подключения.
 	pool := connectionpool.New()
 
-	grpcServer := grpc.NewServer()
-	pb.RegisterConnectionServiceServer(grpcServer, connectionserver.New(pool))
+	// gRPC-сервер с keepalive (см. connectionserver.NewGRPCServer):
+	// полумёртвые соединения закрываются, не блокируя переподключение.
+	grpcServer := connectionserver.NewGRPCServer(pool)
 
 	logger.Info("akira-server listening", "addr", addr)
 	if err := grpcServer.Serve(lis); err != nil {

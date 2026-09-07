@@ -1,6 +1,9 @@
 package client
 
 import (
+	"context"
+	"sync"
+
 	"github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection"
 	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
 )
@@ -18,6 +21,8 @@ type ClientConnection struct {
 
 	out  chan *pb.ServerMessage
 	done chan struct{}
+
+	closeOnce sync.Once
 }
 
 func New(clientID string) *ClientConnection {
@@ -30,21 +35,42 @@ func New(clientID string) *ClientConnection {
 }
 
 // Out — канал исходящих сообщений; сервер вычитывает их
-// и пишет в gRPC stream (единственный писатель). При закрытии
-// подключения канал закрывается.
+// и пишет в gRPC stream (единственный писатель). Канал никогда
+// не закрывается: закрытие подключения сигнализируется через Done(),
+// поэтому конкурентный Post не может запаниковать на закрытом канале.
 func (c *ClientConnection) Out() <-chan *pb.ServerMessage { return c.out }
 
-// Post ставит сообщение в очередь на отправку клиенту.
-func (c *ClientConnection) Post(msg *pb.ServerMessage) error {
+// Done закрывается при Close; писатель потока завершает работу по нему.
+func (c *ClientConnection) Done() <-chan struct{} { return c.done }
+
+// Post ставит сообщение в очередь на отправку клиенту. Учитывает ctx:
+// если очередь переполнена и писатель не вычитывает, Post прерывается
+// по отмене ctx, а не висит вечно.
+func (c *ClientConnection) Post(ctx context.Context, msg *pb.ServerMessage) error {
 	select {
 	case c.out <- msg:
 		return nil
 	case <-c.done:
 		return connection.ErrConnectionClosed
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
-func (c *ClientConnection) Close() {
-	close(c.done)
-	close(c.out)
+// Close закрывает подключение (идемпотентно) и возвращает сообщения,
+// оставшиеся в очереди: клиент их не получит, и пул завершает по ним
+// ожидание ошибкой. Канал out не закрывается — сообщения, которые писатель
+// уже забрал из очереди, могли дойти до клиента, поэтому их судьба
+// неизвестна и ожидание по ним продолжается до переподключения клиента.
+func (c *ClientConnection) Close() []*pb.ServerMessage {
+	c.closeOnce.Do(func() { close(c.done) })
+	var unsent []*pb.ServerMessage
+	for {
+		select {
+		case msg := <-c.out:
+			unsent = append(unsent, msg)
+		default:
+			return unsent
+		}
+	}
 }

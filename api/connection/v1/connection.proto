@@ -108,6 +108,10 @@ message TaskResult {
   string error = 6;
   // duration_ms — фактическое время исполнения.
   int64 duration_ms = 7;
+  // client_id — идентификатор клиента, исполнившего задачу.
+  // Сервер сверяет его с владельцем ожидающей задачи; пустое значение
+  // принимается (совместимость со старыми клиентами).
+  string client_id = 8;
 
   enum Status {
     STATUS_UNSPECIFIED = 0;

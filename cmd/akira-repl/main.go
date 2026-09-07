@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"google.golang.org/grpc"
-
 	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/pool"
 	connectionserver "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/server"
 	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
@@ -48,8 +46,9 @@ func main() {
 
 	pool := connectionpool.New()
 
-	grpcServer := grpc.NewServer()
-	pb.RegisterConnectionServiceServer(grpcServer, connectionserver.New(pool))
+	// gRPC-сервер с keepalive (см. connectionserver.NewGRPCServer):
+	// полумёртвые соединения закрываются, не блокируя переподключение.
+	grpcServer := connectionserver.NewGRPCServer(pool)
 
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil {
@@ -62,12 +61,16 @@ func main() {
 	repl(logger, pool)
 }
 
+// defaultTimeoutMs — таймаут задач по умолчанию: без него задача
+// в адрес навсегда пропавшего клиента висела бы бесконечно.
+const defaultTimeoutMs = int64(60_000)
+
 // repl — цикл чтения команд из stdin.
 func repl(logger *slog.Logger, pool *connectionpool.ConnectionPool) {
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
 
-	timeout := int64(0)
+	timeout := defaultTimeoutMs
 	clientID := ""
 
 	for {
@@ -157,7 +160,7 @@ func usage() {
 	fmt.Println("  exec [client] <cmd...>        — run a command")
 	fmt.Println("  read [client] <path>          — read a file")
 	fmt.Println("  write [client] <path> <text>  — write text to a file")
-	fmt.Println("  timeout <ms>                  — task timeout (0 = no limit)")
+	fmt.Println("  timeout <ms>                  — task timeout (default 60000, 0 = no limit)")
 	fmt.Println("  help | quit")
 }
 
