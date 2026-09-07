@@ -19,20 +19,29 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ConnectionService_Connect_FullMethodName = "/akira.connection.v1.ConnectionService/Connect"
+	ConnectionService_Connect_FullMethodName      = "/akira.connection.v1.ConnectionService/Connect"
+	ConnectionService_SubmitResult_FullMethodName = "/akira.connection.v1.ConnectionService/SubmitResult"
+	ConnectionService_Heartbeat_FullMethodName    = "/akira.connection.v1.ConnectionService/Heartbeat"
 )
 
 // ConnectionServiceClient is the client API for ConnectionService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// connectionService — долгоживущее stream-соединение: клиент подключается
-// и держит поток открытым, сервер отправляет команды для исполнения,
-// клиент возвращает результаты по тому же потоку.
+// connectionService — долгоживущее соединение: клиент подключается,
+// сервер отправляет команды для исполнения по одностороннему потоку,
+// клиент возвращает результаты отдельным методом SubmitResult.
 type ConnectionServiceClient interface {
-	// Connect открывает двунаправленный поток. Первым сообщением клиент
-	// обязан отправить RegisterRequest.
-	Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientMessage, ServerMessage], error)
+	// Connect открывает односторонний поток сервер→клиент.
+	// Регистрация выполняется самим запросом; первое сообщение потока —
+	// RegisterResponse, далее сервер присылает Task.
+	Connect(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ServerMessage], error)
+	// SubmitResult возвращает результат исполнения задачи.
+	// Сервер сопоставляет результат с ожидающей задачей по task_id.
+	SubmitResult(ctx context.Context, in *TaskResult, opts ...grpc.CallOption) (*SubmitResultResponse, error)
+	// Heartbeat — проверка живости: клиент периодически вызывает метод,
+	// сервер отвечает Pong с тем же seq.
+	Heartbeat(ctx context.Context, in *Ping, opts ...grpc.CallOption) (*Pong, error)
 }
 
 type connectionServiceClient struct {
@@ -43,30 +52,63 @@ func NewConnectionServiceClient(cc grpc.ClientConnInterface) ConnectionServiceCl
 	return &connectionServiceClient{cc}
 }
 
-func (c *connectionServiceClient) Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientMessage, ServerMessage], error) {
+func (c *connectionServiceClient) Connect(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ServerMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &ConnectionService_ServiceDesc.Streams[0], ConnectionService_Connect_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[ClientMessage, ServerMessage]{ClientStream: stream}
+	x := &grpc.GenericClientStream[RegisterRequest, ServerMessage]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ConnectionService_ConnectClient = grpc.BidiStreamingClient[ClientMessage, ServerMessage]
+type ConnectionService_ConnectClient = grpc.ServerStreamingClient[ServerMessage]
+
+func (c *connectionServiceClient) SubmitResult(ctx context.Context, in *TaskResult, opts ...grpc.CallOption) (*SubmitResultResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubmitResultResponse)
+	err := c.cc.Invoke(ctx, ConnectionService_SubmitResult_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *connectionServiceClient) Heartbeat(ctx context.Context, in *Ping, opts ...grpc.CallOption) (*Pong, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Pong)
+	err := c.cc.Invoke(ctx, ConnectionService_Heartbeat_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 // ConnectionServiceServer is the server API for ConnectionService service.
 // All implementations must embed UnimplementedConnectionServiceServer
 // for forward compatibility.
 //
-// connectionService — долгоживущее stream-соединение: клиент подключается
-// и держит поток открытым, сервер отправляет команды для исполнения,
-// клиент возвращает результаты по тому же потоку.
+// connectionService — долгоживущее соединение: клиент подключается,
+// сервер отправляет команды для исполнения по одностороннему потоку,
+// клиент возвращает результаты отдельным методом SubmitResult.
 type ConnectionServiceServer interface {
-	// Connect открывает двунаправленный поток. Первым сообщением клиент
-	// обязан отправить RegisterRequest.
-	Connect(grpc.BidiStreamingServer[ClientMessage, ServerMessage]) error
+	// Connect открывает односторонний поток сервер→клиент.
+	// Регистрация выполняется самим запросом; первое сообщение потока —
+	// RegisterResponse, далее сервер присылает Task.
+	Connect(*RegisterRequest, grpc.ServerStreamingServer[ServerMessage]) error
+	// SubmitResult возвращает результат исполнения задачи.
+	// Сервер сопоставляет результат с ожидающей задачей по task_id.
+	SubmitResult(context.Context, *TaskResult) (*SubmitResultResponse, error)
+	// Heartbeat — проверка живости: клиент периодически вызывает метод,
+	// сервер отвечает Pong с тем же seq.
+	Heartbeat(context.Context, *Ping) (*Pong, error)
 	mustEmbedUnimplementedConnectionServiceServer()
 }
 
@@ -77,8 +119,14 @@ type ConnectionServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedConnectionServiceServer struct{}
 
-func (UnimplementedConnectionServiceServer) Connect(grpc.BidiStreamingServer[ClientMessage, ServerMessage]) error {
+func (UnimplementedConnectionServiceServer) Connect(*RegisterRequest, grpc.ServerStreamingServer[ServerMessage]) error {
 	return status.Error(codes.Unimplemented, "method Connect not implemented")
+}
+func (UnimplementedConnectionServiceServer) SubmitResult(context.Context, *TaskResult) (*SubmitResultResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitResult not implemented")
+}
+func (UnimplementedConnectionServiceServer) Heartbeat(context.Context, *Ping) (*Pong, error) {
+	return nil, status.Error(codes.Unimplemented, "method Heartbeat not implemented")
 }
 func (UnimplementedConnectionServiceServer) mustEmbedUnimplementedConnectionServiceServer() {}
 func (UnimplementedConnectionServiceServer) testEmbeddedByValue()                           {}
@@ -102,11 +150,51 @@ func RegisterConnectionServiceServer(s grpc.ServiceRegistrar, srv ConnectionServ
 }
 
 func _ConnectionService_Connect_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ConnectionServiceServer).Connect(&grpc.GenericServerStream[ClientMessage, ServerMessage]{ServerStream: stream})
+	m := new(RegisterRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ConnectionServiceServer).Connect(m, &grpc.GenericServerStream[RegisterRequest, ServerMessage]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ConnectionService_ConnectServer = grpc.BidiStreamingServer[ClientMessage, ServerMessage]
+type ConnectionService_ConnectServer = grpc.ServerStreamingServer[ServerMessage]
+
+func _ConnectionService_SubmitResult_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TaskResult)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConnectionServiceServer).SubmitResult(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConnectionService_SubmitResult_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConnectionServiceServer).SubmitResult(ctx, req.(*TaskResult))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConnectionService_Heartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Ping)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConnectionServiceServer).Heartbeat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConnectionService_Heartbeat_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConnectionServiceServer).Heartbeat(ctx, req.(*Ping))
+	}
+	return interceptor(ctx, in, info, handler)
+}
 
 // ConnectionService_ServiceDesc is the grpc.ServiceDesc for ConnectionService service.
 // It's only intended for direct use with grpc.RegisterService,
@@ -114,13 +202,21 @@ type ConnectionService_ConnectServer = grpc.BidiStreamingServer[ClientMessage, S
 var ConnectionService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "akira.connection.v1.ConnectionService",
 	HandlerType: (*ConnectionServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SubmitResult",
+			Handler:    _ConnectionService_SubmitResult_Handler,
+		},
+		{
+			MethodName: "Heartbeat",
+			Handler:    _ConnectionService_Heartbeat_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Connect",
 			Handler:       _ConnectionService_Connect_Handler,
 			ServerStreams: true,
-			ClientStreams: true,
 		},
 	},
 	Metadata: "connection/v1/connection.proto",

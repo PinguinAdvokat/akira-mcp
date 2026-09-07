@@ -6,34 +6,38 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1;connectionpb";
 
-// connectionService — долгоживущее stream-соединение: клиент подключается
-// и держит поток открытым, сервер отправляет команды для исполнения,
-// клиент возвращает результаты по тому же потоку.
+// connectionService — долгоживущее соединение: клиент подключается,
+// сервер отправляет команды для исполнения по одностороннему потоку,
+// клиент возвращает результаты отдельным методом SubmitResult.
 service ConnectionService {
-  // Connect открывает двунаправленный поток. Первым сообщением клиент
-  // обязан отправить RegisterRequest.
-  rpc Connect(stream ClientMessage) returns (stream ServerMessage);
+  // Connect открывает односторонний поток сервер→клиент.
+  // Регистрация выполняется самим запросом; первое сообщение потока —
+  // RegisterResponse, далее сервер присылает Task.
+  rpc Connect(RegisterRequest) returns (stream ServerMessage);
+
+  // SubmitResult возвращает результат исполнения задачи.
+  // Сервер сопоставляет результат с ожидающей задачей по task_id.
+  rpc SubmitResult(TaskResult) returns (SubmitResultResponse);
+
+  // Heartbeat — проверка живости: клиент периодически вызывает метод,
+  // сервер отвечает Pong с тем же seq.
+  rpc Heartbeat(Ping) returns (Pong);
 }
 
-// ClientMessage — конверт для всех сообщений клиента.
-message ClientMessage {
-  oneof payload {
-    RegisterRequest register = 1;
-    TaskResult result = 2;
-    Ping ping = 3;
-  }
-}
-
-// ServerMessage — конверт для всех сообщений сервера.
+// ServerMessage — конверт для сообщений сервера в потоке Connect.
 message ServerMessage {
   oneof payload {
     RegisterResponse register_ack = 1;
     Task task = 2;
-    Pong pong = 3;
   }
 }
 
-// RegisterRequest — первое сообщение при подключении.
+// SubmitResultResponse — подтверждение приёма результата.
+// Результат задач, которых сервер уже не ждёт (например, истёк
+// таймаут), принимается молча: это нормальная ситуация.
+message SubmitResultResponse {}
+
+// RegisterRequest — запрос на подключение.
 message RegisterRequest {
   // client_id — уникальный идентификатор клиента (uuid). Обязателен.
   string client_id = 1;
@@ -42,10 +46,10 @@ message RegisterRequest {
   string platform = 3;
 }
 
-// RegisterResponse — подтверждение регистрации.
+// RegisterResponse — первое сообщение потока после регистрации.
 message RegisterResponse {
   string session_id = 1;
-  // heartbeat_interval_ms — период отправки Ping клиентом.
+  // heartbeat_interval_ms — период вызова Ping клиентом.
   int64 heartbeat_interval_ms = 2;
 }
 

@@ -1,8 +1,7 @@
 package connectionserver
 
 import (
-	"errors"
-	"io"
+	"context"
 	"log/slog"
 
 	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/pool"
@@ -11,7 +10,8 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// HeartbeatIntervalMs — период Ping, сообщаемый клиенту при регистрации.
+// HeartbeatIntervalMs — период вызова Heartbeat, сообщаемый клиенту
+// при регистрации.
 const HeartbeatIntervalMs = 30_000
 
 // ConnectionServer реализует akira.connection.v1.ConnectionService.
@@ -28,17 +28,13 @@ func New(pool *connectionpool.ConnectionPool) *ConnectionServer {
 	}
 }
 
-func (s *ConnectionServer) Connect(stream pb.ConnectionService_ConnectServer) error {
-	// Первое сообщение обязано быть RegisterRequest.
-	firstMsg, err := stream.Recv()
-	if err != nil {
-		s.logger.Warn("failed to receive register request", "err", err)
-		return err
-	}
-	reg := firstMsg.GetRegister()
+// Connect регистрирует клиента (самим запросом) и открывает
+// односторонний поток сервер→клиент. Первое сообщение потока —
+// RegisterResponse, далее сервер присылает Task.
+func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.ConnectionService_ConnectServer) error {
 	if reg == nil || reg.ClientId == "" {
-		s.logger.Warn("invalid first message", "client_id", reg.GetClientId())
-		return status.Error(codes.InvalidArgument, "first message must be RegisterRequest with client_id")
+		s.logger.Warn("invalid register request", "client_id", reg.GetClientId())
+		return status.Error(codes.InvalidArgument, "register request must have client_id")
 	}
 
 	logger := s.logger.With(slog.String("client_id", reg.ClientId))
@@ -50,8 +46,8 @@ func (s *ConnectionServer) Connect(stream pb.ConnectionService_ConnectServer) er
 	}
 	defer s.pool.Unregister(conn)
 
-	// Подтверждение регистрации.
-	if err := conn.Post(&pb.ServerMessage{
+	// Подтверждение регистрации — первое сообщение потока.
+	if err := stream.Send(&pb.ServerMessage{
 		Payload: &pb.ServerMessage_RegisterAck{
 			RegisterAck: &pb.RegisterResponse{
 				SessionId:           conn.SessionID,
@@ -68,36 +64,36 @@ func (s *ConnectionServer) Connect(stream pb.ConnectionService_ConnectServer) er
 
 	// Единственный писатель stream: исходящие сообщения из conn.Out()
 	// сериализуются в поток (параллельные Send в один stream запрещены).
-	go func() {
-		for msg := range conn.Out() {
-			if err := stream.Send(msg); err != nil {
-				// Разрыв stream — Recv ниже тоже завершится с ошибкой.
-				logger.Warn("stream send failed", "err", err)
-				return
-			}
-		}
-	}()
-
-	// Читаем входящие: результаты команд и heartbeat.
 	for {
-		msg, err := stream.Recv()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
+		select {
+		case msg := <-conn.Out():
+			if err := stream.Send(msg); err != nil {
+				// Разрыв stream — завершаем handler, пул снимет подключение.
+				logger.Warn("stream send failed", "err", err)
 				return nil
 			}
-			logger.Warn("stream recv failed", "err", err)
-			return err
-		}
-		switch payload := msg.Payload.(type) {
-		case *pb.ClientMessage_Result:
-			conn.HandleResult(payload.Result)
-		case *pb.ClientMessage_Ping:
-			_ = conn.Post(&pb.ServerMessage{
-				Payload: &pb.ServerMessage_Pong{Pong: &pb.Pong{Seq: payload.Ping.Seq}},
-			})
-		case *pb.ClientMessage_Register:
-			logger.Warn("duplicate register")
-			return status.Error(codes.InvalidArgument, "duplicate register")
+		case <-conn.Done():
+			// Подключение закрыто (Unregister) — завершаем handler.
+			return nil
+		case <-stream.Context().Done():
+			return nil
 		}
 	}
+}
+
+// SubmitResult принимает результат исполнения задачи от клиента.
+// Сервер сопоставляет результат с ожидающей задачей по task_id.
+func (s *ConnectionServer) SubmitResult(ctx context.Context, res *pb.TaskResult) (*pb.SubmitResultResponse, error) {
+	if res == nil || res.TaskId == "" {
+		return nil, status.Error(codes.InvalidArgument, "result must have task_id")
+	}
+	// Результат задачи, которой никто не ждёт, отбрасывается молча —
+	// нормальная ситуация после таймаута на стороне сервера.
+	s.pool.HandleResult(res)
+	return &pb.SubmitResultResponse{}, nil
+}
+
+// Heartbeat — проверка живости клиента: отвечает Pong с тем же seq.
+func (s *ConnectionServer) Heartbeat(ctx context.Context, ping *pb.Ping) (*pb.Pong, error) {
+	return &pb.Pong{Seq: ping.GetSeq()}, nil
 }

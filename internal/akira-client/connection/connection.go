@@ -68,33 +68,18 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 }
 
-// session — одно подключение к серверу: stream, очередь исходящих
-// сообщений и канал завершения.
-type session struct {
-	stream pb.ConnectionService_ConnectClient
-	out    chan *pb.ClientMessage
-	done   chan struct{}
-}
-
 // runSession устанавливает подключение, регистрируется с client_id
 // и обслуживает поток до разрыва или отмены ctx.
 func runSession(ctx context.Context, client pb.ConnectionServiceClient, clientID string) error {
-	stream, err := client.Connect(ctx)
+	// Регистрация выполняется самим запросом Connect; сервер присылает
+	// RegisterResponse первым сообщением одностороннего потока.
+	stream, err := client.Connect(ctx, &pb.RegisterRequest{
+		ClientId: clientID,
+		Hostname: hostname(),
+		Platform: runtime.GOOS,
+	})
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
-	}
-
-	// Регистрация — первое сообщение в потоке.
-	if err := stream.Send(&pb.ClientMessage{
-		Payload: &pb.ClientMessage_Register{
-			Register: &pb.RegisterRequest{
-				ClientId: clientID,
-				Hostname: hostname(),
-				Platform: runtime.GOOS,
-			},
-		},
-	}); err != nil {
-		return fmt.Errorf("register send: %w", err)
 	}
 
 	msg, err := stream.Recv()
@@ -107,17 +92,7 @@ func runSession(ctx context.Context, client pb.ConnectionServiceClient, clientID
 	}
 	log.Printf("registered: session_id=%s", ack.SessionId)
 
-	s := &session{
-		stream: stream,
-		out:    make(chan *pb.ClientMessage, 16),
-		done:   make(chan struct{}),
-	}
-	// done закрывается один раз — здесь, при выходе из сессии;
-	// writer и heartbeat выходят по нему.
-	defer close(s.done)
-
-	go s.writeLoop()
-	go s.heartbeat(ack.HeartbeatIntervalMs)
+	go heartbeat(ctx, client, ack.HeartbeatIntervalMs)
 
 	// Приём задач: исполнение запускается в отдельной горутине,
 	// чтобы разрыв соединения не прерывал выполняемые задачи.
@@ -127,42 +102,24 @@ func runSession(ctx context.Context, client pb.ConnectionServiceClient, clientID
 			return fmt.Errorf("recv: %w", err)
 		}
 		if task := msg.GetTask(); task != nil {
-			go s.runTask(task)
+			go runTask(ctx, client, task)
 		}
-		// Pong игнорируем.
 	}
 }
 
-// runTask исполняет задачу и отправляет результат. Задача продолжает
-// исполняться при разрыве соединения; если результат доставить уже
-// некуда — это логируется.
-func (s *session) runTask(task *pb.Task) {
+// runTask исполняет задачу и отправляет результат через SubmitResult.
+// Задача продолжает исполняться при разрыве соединения; если результат
+// доставить уже некуда — это логируется.
+func runTask(ctx context.Context, client pb.ConnectionServiceClient, task *pb.Task) {
 	res := executor.Execute(task)
-	if err := s.post(&pb.ClientMessage{
-		Payload: &pb.ClientMessage_Result{Result: res},
-	}); err != nil {
+	if _, err := client.SubmitResult(ctx, res); err != nil {
 		log.Printf("task %s finished, but its result was not delivered: %v", task.Id, err)
 	}
 }
 
-// writeLoop — единственный писатель в stream (параллельные Send
-// в один gRPC stream запрещены).
-func (s *session) writeLoop() {
-	for {
-		select {
-		case msg := <-s.out:
-			if err := s.stream.Send(msg); err != nil {
-				log.Printf("stream send failed: %v", err)
-				return
-			}
-		case <-s.done:
-			return
-		}
-	}
-}
-
-// heartbeat периодически отправляет Ping, чтобы сервер видел, что клиент жив.
-func (s *session) heartbeat(intervalMs int64) {
+// heartbeat периодически вызывает Ping, чтобы сервер видел,
+// что клиент жив.
+func heartbeat(ctx context.Context, client pb.ConnectionServiceClient, intervalMs int64) {
 	if intervalMs <= 0 {
 		intervalMs = defaultHeartbeatMs
 	}
@@ -173,22 +130,12 @@ func (s *session) heartbeat(intervalMs int64) {
 		select {
 		case <-ticker.C:
 			seq++
-			_ = s.post(&pb.ClientMessage{
-				Payload: &pb.ClientMessage_Ping{Ping: &pb.Ping{Seq: seq}},
-			})
-		case <-s.done:
+			if _, err := client.Heartbeat(ctx, &pb.Ping{Seq: seq}); err != nil {
+				log.Printf("ping failed: %v", err)
+			}
+		case <-ctx.Done():
 			return
 		}
-	}
-}
-
-// post ставит исходящее сообщение в очередь к writeLoop.
-func (s *session) post(msg *pb.ClientMessage) error {
-	select {
-	case s.out <- msg:
-		return nil
-	case <-s.done:
-		return errors.New("connection closed")
 	}
 }
 

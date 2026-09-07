@@ -77,113 +77,13 @@ func (TaskResult_Status) EnumDescriptor() ([]byte, []int) {
 	return file_connection_v1_connection_proto_rawDescGZIP(), []int{10, 0}
 }
 
-// ClientMessage — конверт для всех сообщений клиента.
-type ClientMessage struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Payload:
-	//
-	//	*ClientMessage_Register
-	//	*ClientMessage_Result
-	//	*ClientMessage_Ping
-	Payload       isClientMessage_Payload `protobuf_oneof:"payload"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ClientMessage) Reset() {
-	*x = ClientMessage{}
-	mi := &file_connection_v1_connection_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ClientMessage) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ClientMessage) ProtoMessage() {}
-
-func (x *ClientMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_connection_v1_connection_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ClientMessage.ProtoReflect.Descriptor instead.
-func (*ClientMessage) Descriptor() ([]byte, []int) {
-	return file_connection_v1_connection_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *ClientMessage) GetPayload() isClientMessage_Payload {
-	if x != nil {
-		return x.Payload
-	}
-	return nil
-}
-
-func (x *ClientMessage) GetRegister() *RegisterRequest {
-	if x != nil {
-		if x, ok := x.Payload.(*ClientMessage_Register); ok {
-			return x.Register
-		}
-	}
-	return nil
-}
-
-func (x *ClientMessage) GetResult() *TaskResult {
-	if x != nil {
-		if x, ok := x.Payload.(*ClientMessage_Result); ok {
-			return x.Result
-		}
-	}
-	return nil
-}
-
-func (x *ClientMessage) GetPing() *Ping {
-	if x != nil {
-		if x, ok := x.Payload.(*ClientMessage_Ping); ok {
-			return x.Ping
-		}
-	}
-	return nil
-}
-
-type isClientMessage_Payload interface {
-	isClientMessage_Payload()
-}
-
-type ClientMessage_Register struct {
-	Register *RegisterRequest `protobuf:"bytes,1,opt,name=register,proto3,oneof"`
-}
-
-type ClientMessage_Result struct {
-	Result *TaskResult `protobuf:"bytes,2,opt,name=result,proto3,oneof"`
-}
-
-type ClientMessage_Ping struct {
-	Ping *Ping `protobuf:"bytes,3,opt,name=ping,proto3,oneof"`
-}
-
-func (*ClientMessage_Register) isClientMessage_Payload() {}
-
-func (*ClientMessage_Result) isClientMessage_Payload() {}
-
-func (*ClientMessage_Ping) isClientMessage_Payload() {}
-
-// ServerMessage — конверт для всех сообщений сервера.
+// ServerMessage — конверт для сообщений сервера в потоке Connect.
 type ServerMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*ServerMessage_RegisterAck
 	//	*ServerMessage_Task
-	//	*ServerMessage_Pong
 	Payload       isServerMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -191,7 +91,7 @@ type ServerMessage struct {
 
 func (x *ServerMessage) Reset() {
 	*x = ServerMessage{}
-	mi := &file_connection_v1_connection_proto_msgTypes[1]
+	mi := &file_connection_v1_connection_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -203,7 +103,7 @@ func (x *ServerMessage) String() string {
 func (*ServerMessage) ProtoMessage() {}
 
 func (x *ServerMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_connection_v1_connection_proto_msgTypes[1]
+	mi := &file_connection_v1_connection_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -216,7 +116,7 @@ func (x *ServerMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerMessage.ProtoReflect.Descriptor instead.
 func (*ServerMessage) Descriptor() ([]byte, []int) {
-	return file_connection_v1_connection_proto_rawDescGZIP(), []int{1}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ServerMessage) GetPayload() isServerMessage_Payload {
@@ -244,15 +144,6 @@ func (x *ServerMessage) GetTask() *Task {
 	return nil
 }
 
-func (x *ServerMessage) GetPong() *Pong {
-	if x != nil {
-		if x, ok := x.Payload.(*ServerMessage_Pong); ok {
-			return x.Pong
-		}
-	}
-	return nil
-}
-
 type isServerMessage_Payload interface {
 	isServerMessage_Payload()
 }
@@ -265,17 +156,50 @@ type ServerMessage_Task struct {
 	Task *Task `protobuf:"bytes,2,opt,name=task,proto3,oneof"`
 }
 
-type ServerMessage_Pong struct {
-	Pong *Pong `protobuf:"bytes,3,opt,name=pong,proto3,oneof"`
-}
-
 func (*ServerMessage_RegisterAck) isServerMessage_Payload() {}
 
 func (*ServerMessage_Task) isServerMessage_Payload() {}
 
-func (*ServerMessage_Pong) isServerMessage_Payload() {}
+// SubmitResultResponse — подтверждение приёма результата.
+// Результат задач, которых сервер уже не ждёт (например, истёк
+// таймаут), принимается молча: это нормальная ситуация.
+type SubmitResultResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
 
-// RegisterRequest — первое сообщение при подключении.
+func (x *SubmitResultResponse) Reset() {
+	*x = SubmitResultResponse{}
+	mi := &file_connection_v1_connection_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitResultResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitResultResponse) ProtoMessage() {}
+
+func (x *SubmitResultResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_connection_v1_connection_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitResultResponse.ProtoReflect.Descriptor instead.
+func (*SubmitResultResponse) Descriptor() ([]byte, []int) {
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{1}
+}
+
+// RegisterRequest — запрос на подключение.
 type RegisterRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// client_id — уникальный идентификатор клиента (uuid). Обязателен.
@@ -338,11 +262,11 @@ func (x *RegisterRequest) GetPlatform() string {
 	return ""
 }
 
-// RegisterResponse — подтверждение регистрации.
+// RegisterResponse — первое сообщение потока после регистрации.
 type RegisterResponse struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	// heartbeat_interval_ms — период отправки Ping клиентом.
+	// heartbeat_interval_ms — период вызова Ping клиентом.
 	HeartbeatIntervalMs int64 `protobuf:"varint,2,opt,name=heartbeat_interval_ms,json=heartbeatIntervalMs,proto3" json:"heartbeat_interval_ms,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
@@ -867,17 +791,12 @@ var File_connection_v1_connection_proto protoreflect.FileDescriptor
 
 const file_connection_v1_connection_proto_rawDesc = "" +
 	"\n" +
-	"\x1econnection/v1/connection.proto\x12\x13akira.connection.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xca\x01\n" +
-	"\rClientMessage\x12B\n" +
-	"\bregister\x18\x01 \x01(\v2$.akira.connection.v1.RegisterRequestH\x00R\bregister\x129\n" +
-	"\x06result\x18\x02 \x01(\v2\x1f.akira.connection.v1.TaskResultH\x00R\x06result\x12/\n" +
-	"\x04ping\x18\x03 \x01(\v2\x19.akira.connection.v1.PingH\x00R\x04pingB\t\n" +
-	"\apayload\"\xc8\x01\n" +
+	"\x1econnection/v1/connection.proto\x12\x13akira.connection.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x97\x01\n" +
 	"\rServerMessage\x12J\n" +
 	"\fregister_ack\x18\x01 \x01(\v2%.akira.connection.v1.RegisterResponseH\x00R\vregisterAck\x12/\n" +
-	"\x04task\x18\x02 \x01(\v2\x19.akira.connection.v1.TaskH\x00R\x04task\x12/\n" +
-	"\x04pong\x18\x03 \x01(\v2\x19.akira.connection.v1.PongH\x00R\x04pongB\t\n" +
-	"\apayload\"f\n" +
+	"\x04task\x18\x02 \x01(\v2\x19.akira.connection.v1.TaskH\x00R\x04taskB\t\n" +
+	"\apayload\"\x16\n" +
+	"\x14SubmitResultResponse\"f\n" +
 	"\x0fRegisterRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1a\n" +
@@ -926,9 +845,11 @@ const file_connection_v1_connection_proto_rawDesc = "" +
 	"\tSTATUS_OK\x10\x01\x12\x10\n" +
 	"\fSTATUS_ERROR\x10\x02\x12\x12\n" +
 	"\x0eSTATUS_TIMEOUT\x10\x03\x12\x13\n" +
-	"\x0fSTATUS_REJECTED\x10\x042j\n" +
+	"\x0fSTATUS_REJECTED\x10\x042\x89\x02\n" +
 	"\x11ConnectionService\x12U\n" +
-	"\aConnect\x12\".akira.connection.v1.ClientMessage\x1a\".akira.connection.v1.ServerMessage(\x010\x01BJZHgithub.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1;connectionpbb\x06proto3"
+	"\aConnect\x12$.akira.connection.v1.RegisterRequest\x1a\".akira.connection.v1.ServerMessage0\x01\x12Z\n" +
+	"\fSubmitResult\x12\x1f.akira.connection.v1.TaskResult\x1a).akira.connection.v1.SubmitResultResponse\x12A\n" +
+	"\tHeartbeat\x12\x19.akira.connection.v1.Ping\x1a\x19.akira.connection.v1.PongBJZHgithub.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1;connectionpbb\x06proto3"
 
 var (
 	file_connection_v1_connection_proto_rawDescOnce sync.Once
@@ -946,8 +867,8 @@ var file_connection_v1_connection_proto_enumTypes = make([]protoimpl.EnumInfo, 1
 var file_connection_v1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_connection_v1_connection_proto_goTypes = []any{
 	(TaskResult_Status)(0),        // 0: akira.connection.v1.TaskResult.Status
-	(*ClientMessage)(nil),         // 1: akira.connection.v1.ClientMessage
-	(*ServerMessage)(nil),         // 2: akira.connection.v1.ServerMessage
+	(*ServerMessage)(nil),         // 1: akira.connection.v1.ServerMessage
+	(*SubmitResultResponse)(nil),  // 2: akira.connection.v1.SubmitResultResponse
 	(*RegisterRequest)(nil),       // 3: akira.connection.v1.RegisterRequest
 	(*RegisterResponse)(nil),      // 4: akira.connection.v1.RegisterResponse
 	(*Ping)(nil),                  // 5: akira.connection.v1.Ping
@@ -960,24 +881,24 @@ var file_connection_v1_connection_proto_goTypes = []any{
 	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
 }
 var file_connection_v1_connection_proto_depIdxs = []int32{
-	3,  // 0: akira.connection.v1.ClientMessage.register:type_name -> akira.connection.v1.RegisterRequest
-	11, // 1: akira.connection.v1.ClientMessage.result:type_name -> akira.connection.v1.TaskResult
-	5,  // 2: akira.connection.v1.ClientMessage.ping:type_name -> akira.connection.v1.Ping
-	4,  // 3: akira.connection.v1.ServerMessage.register_ack:type_name -> akira.connection.v1.RegisterResponse
-	7,  // 4: akira.connection.v1.ServerMessage.task:type_name -> akira.connection.v1.Task
-	6,  // 5: akira.connection.v1.ServerMessage.pong:type_name -> akira.connection.v1.Pong
-	8,  // 6: akira.connection.v1.Task.exec:type_name -> akira.connection.v1.ExecTask
-	9,  // 7: akira.connection.v1.Task.read_file:type_name -> akira.connection.v1.ReadFileRequest
-	10, // 8: akira.connection.v1.Task.write_file:type_name -> akira.connection.v1.WriteFileRequest
-	12, // 9: akira.connection.v1.Task.created_at:type_name -> google.protobuf.Timestamp
-	0,  // 10: akira.connection.v1.TaskResult.status:type_name -> akira.connection.v1.TaskResult.Status
-	1,  // 11: akira.connection.v1.ConnectionService.Connect:input_type -> akira.connection.v1.ClientMessage
-	2,  // 12: akira.connection.v1.ConnectionService.Connect:output_type -> akira.connection.v1.ServerMessage
-	12, // [12:13] is the sub-list for method output_type
-	11, // [11:12] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	4,  // 0: akira.connection.v1.ServerMessage.register_ack:type_name -> akira.connection.v1.RegisterResponse
+	7,  // 1: akira.connection.v1.ServerMessage.task:type_name -> akira.connection.v1.Task
+	8,  // 2: akira.connection.v1.Task.exec:type_name -> akira.connection.v1.ExecTask
+	9,  // 3: akira.connection.v1.Task.read_file:type_name -> akira.connection.v1.ReadFileRequest
+	10, // 4: akira.connection.v1.Task.write_file:type_name -> akira.connection.v1.WriteFileRequest
+	12, // 5: akira.connection.v1.Task.created_at:type_name -> google.protobuf.Timestamp
+	0,  // 6: akira.connection.v1.TaskResult.status:type_name -> akira.connection.v1.TaskResult.Status
+	3,  // 7: akira.connection.v1.ConnectionService.Connect:input_type -> akira.connection.v1.RegisterRequest
+	11, // 8: akira.connection.v1.ConnectionService.SubmitResult:input_type -> akira.connection.v1.TaskResult
+	5,  // 9: akira.connection.v1.ConnectionService.Heartbeat:input_type -> akira.connection.v1.Ping
+	1,  // 10: akira.connection.v1.ConnectionService.Connect:output_type -> akira.connection.v1.ServerMessage
+	2,  // 11: akira.connection.v1.ConnectionService.SubmitResult:output_type -> akira.connection.v1.SubmitResultResponse
+	6,  // 12: akira.connection.v1.ConnectionService.Heartbeat:output_type -> akira.connection.v1.Pong
+	10, // [10:13] is the sub-list for method output_type
+	7,  // [7:10] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_connection_v1_connection_proto_init() }
@@ -986,14 +907,8 @@ func file_connection_v1_connection_proto_init() {
 		return
 	}
 	file_connection_v1_connection_proto_msgTypes[0].OneofWrappers = []any{
-		(*ClientMessage_Register)(nil),
-		(*ClientMessage_Result)(nil),
-		(*ClientMessage_Ping)(nil),
-	}
-	file_connection_v1_connection_proto_msgTypes[1].OneofWrappers = []any{
 		(*ServerMessage_RegisterAck)(nil),
 		(*ServerMessage_Task)(nil),
-		(*ServerMessage_Pong)(nil),
 	}
 	file_connection_v1_connection_proto_msgTypes[6].OneofWrappers = []any{
 		(*Task_Exec)(nil),
