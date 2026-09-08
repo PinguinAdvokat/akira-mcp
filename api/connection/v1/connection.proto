@@ -44,6 +44,9 @@ message RegisterRequest {
   string hostname = 2;
   // platform — целевая ОС: linux / darwin / windows.
   string platform = 3;
+  // connect_key — короткий ключ пользователя из auth-сервиса;
+  // по нему сервер находит владельца подключения. Обязателен.
+  string connect_key = 4;
 }
 
 // RegisterResponse — первое сообщение потока после регистрации.
@@ -51,6 +54,9 @@ message RegisterResponse {
   string session_id = 1;
   // heartbeat_interval_ms — период вызова Ping клиентом.
   int64 heartbeat_interval_ms = 2;
+  // connection_id — назначенный сервером ключ подключения
+  // формата {user_id}:{client_id}. Клиент подписывает им TaskResult.
+  string connection_id = 3;
 }
 
 message Ping {
@@ -108,8 +114,9 @@ message TaskResult {
   string error = 6;
   // duration_ms — фактическое время исполнения.
   int64 duration_ms = 7;
-  // client_id — идентификатор клиента, исполнившего задачу.
-  // Сервер сверяет его с владельцем ожидающей задачи; пустое значение
+  // connection_id — ключ подключения, исполнившего задачу
+  // ({user_id}:{client_id}, выдаётся в RegisterResponse). Сервер
+  // сверяет его с владельцем ожидающей задачи; пустое значение
   // принимается (совместимость со старыми клиентами).
   string client_id = 8;
 

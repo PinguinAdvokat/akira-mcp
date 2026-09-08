@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,54 +16,79 @@ import (
 
 // pendingEntry — задача, ожидающая результат: SendTask ждёт resCh,
 // HandleResult доставляет результат в resCh, а ошибки ожидания
-// (задача не ушла клиенту) — в errCh. owner — client_id, которому
-// отправлена задача: по нему отбрасываются результаты от чужих клиентов.
+// (задача не ушла клиенту) — в errCh. owner — connection_id, которому
+// отправлена задача: по нему отбрасываются результаты чужих подключений.
 type pendingEntry struct {
 	resCh chan *pb.TaskResult
 	errCh chan error
 	owner string
 }
 
-// ConnectionPool хранит активные подключения клиентов по client_id
-// и реестр задач, ожидающих результат, по task_id. Через SendTask
-// любые объекты сервера могут отправлять задачи на исполнение клиенту;
-// результаты приходят через SubmitResult и маршрутизируются по task_id.
-// Ожидание результата не переживает разрыв соединения: при потере
-// подключения все задачи клиента завершаются ошибкой ErrConnectionClosed —
-// и отправленные, и не успевшие уйти.
+// ConnectionPool хранит активные подключения по connection_id
+// ({user_id}:{client_id}) и реестр задач, ожидающих результат, по task_id.
+// Через SendTask любые объекты сервера могут отправлять задачи на
+// исполнение клиенту; результаты приходят через SubmitResult
+// и маршрутизируются по task_id. Ожидание результата не переживает
+// разрыв соединения: при потере подключения все задачи клиента
+// завершаются ошибкой ErrConnectionClosed — и отправленные, и не
+// успевшие уйти.
 type ConnectionPool struct {
-	mu      sync.RWMutex
-	conns   map[string]*client.ClientConnection
-	pending map[string]*pendingEntry
+	mu             sync.RWMutex
+	conns          map[string]*client.ClientConnection
+	pending        map[string]*pendingEntry
+	maxConnections int // лимит одновременных подключений на пользователя; 0 = без лимита
 }
 
-func New() *ConnectionPool {
+// New создаёт пул. maxConnections — лимит одновременных подключений
+// на одного пользователя (MAX_CONNECTIONS); 0 — без лимита.
+func New(maxConnections int) *ConnectionPool {
 	return &ConnectionPool{
-		conns:   make(map[string]*client.ClientConnection),
-		pending: make(map[string]*pendingEntry),
+		conns:          make(map[string]*client.ClientConnection),
+		pending:        make(map[string]*pendingEntry),
+		maxConnections: maxConnections,
 	}
 }
 
-// Register добавляет новое подключение в пул.
-// Возвращает ошибку, если клиент с таким client_id уже подключен.
-func (p *ConnectionPool) Register(clientID string) (*client.ClientConnection, error) {
+// Register добавляет новое подключение в пул под connection_id
+// ({user_id}:{client_id}). Возвращает ErrAlreadyRegistered, если
+// подключение с таким connection_id уже активно, и ErrTooManyConnections,
+// если пользователь превысил лимит одновременных подключений.
+func (p *ConnectionPool) Register(connectionID, userID string) (*client.ClientConnection, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if _, ok := p.conns[clientID]; ok {
+	if _, ok := p.conns[connectionID]; ok {
 		return nil, connection.ErrAlreadyRegistered
 	}
-	c := client.New(clientID)
-	p.conns[clientID] = c
+	if p.maxConnections > 0 && p.countByUser(userID) >= p.maxConnections {
+		return nil, connection.ErrTooManyConnections
+	}
+	c := client.New(connectionID)
+	p.conns[connectionID] = c
 	return c, nil
 }
 
+// countByUser считает активные подключения пользователя по префиксу
+// {user_id}: — user_id фиксированной длины (hex), неоднозначности
+// разделителя нет. Вызывать под p.mu.
+func (p *ConnectionPool) countByUser(userID string) int {
+	prefix := userID + ":"
+	n := 0
+	for id := range p.conns {
+		if strings.HasPrefix(id, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
 // Unregister убирает подключение из пула и завершает ошибкой
-// ErrConnectionClosed ожидание всех задач клиента — результата по ним
-// можно не ждать, даже если клиент переподключится: переподключение
-// не пересылает уже отправленные задачи заново. Если в пуле уже другое,
-// более новое подключение (гонка переподключения) — только завершает
-// задачи, сообщения о которых не ушли из очереди старого подключения:
-// клиент на связи, и отправленные ему задачи могут ещё доставить результат.
+// ErrConnectionClosed ожидание всех задач подключения — результата
+// по ним можно не ждать, даже если клиент переподключится:
+// переподключение не пересылает уже отправленные задачи заново.
+// Если в пуле уже другое, более новое подключение (гонка
+// переподключения) — только завершает задачи, сообщения о которых
+// не ушли из очереди старого подключения: клиент на связи, и
+// отправленные ему задачи могут ещё доставить результат.
 func (p *ConnectionPool) Unregister(conn *client.ClientConnection) {
 	p.mu.Lock()
 	cur, ok := p.conns[conn.ClientID]
@@ -79,24 +105,24 @@ func (p *ConnectionPool) Unregister(conn *client.ClientConnection) {
 	p.failPendingClient(conn.ClientID)
 }
 
-// Disconnect разрывает текущее подключение клиента: атомарно убирает
+// Disconnect разрывает текущее подключение: атомарно убирает
 // его из пула (за одну блокировку — между чтением и удалением подключение
 // не успеет смениться на новое при переподключении), завершает поток
-// Connect и возвращает true. Возвращает false, если клиент не подключен.
-// Все задачи клиента (и отправленные, и не ушедшие) завершаются ошибкой
-// ErrConnectionClosed.
-func (p *ConnectionPool) Disconnect(clientID string) bool {
+// Connect и возвращает true. Возвращает false, если подключение не активно.
+// Все задачи подключения (и отправленные, и не ушедшие) завершаются
+// ошибкой ErrConnectionClosed.
+func (p *ConnectionPool) Disconnect(connectionID string) bool {
 	p.mu.Lock()
-	c, ok := p.conns[clientID]
+	c, ok := p.conns[connectionID]
 	if ok {
-		delete(p.conns, clientID)
+		delete(p.conns, connectionID)
 	}
 	p.mu.Unlock()
 	if !ok {
 		return false
 	}
 	c.Close()
-	p.failPendingClient(clientID)
+	p.failPendingClient(connectionID)
 	return true
 }
 
@@ -127,15 +153,15 @@ func (p *ConnectionPool) failUnsent(msgs []*pb.ServerMessage) {
 }
 
 // failPendingClient завершает ошибкой ErrConnectionClosed ожидание всех
-// задач клиента clientID — и отправленных, и оставшихся в очереди.
+// задач подключения connectionID — и отправленных, и оставшихся в очереди.
 // Вызывается при потере подключения: клиент может не вернуться (или не
 // получить часть задач из-за «полумёртвого» канала), и без этого
 // задачи без таймаута ждали бы результата неограниченно долго.
-func (p *ConnectionPool) failPendingClient(clientID string) {
+func (p *ConnectionPool) failPendingClient(connectionID string) {
 	p.mu.Lock()
 	var entries []*pendingEntry
 	for id, e := range p.pending {
-		if e.owner == clientID {
+		if e.owner == connectionID {
 			delete(p.pending, id)
 			entries = append(entries, e)
 		}
@@ -148,14 +174,16 @@ func (p *ConnectionPool) failPendingClient(clientID string) {
 
 // HandleResult доставляет TaskResult (поступивший через SubmitResult)
 // ждущему SendTask по task_id — в том числе после переподключения
-// клиента. Результат от клиента, не являющегося владельцем задачи,
-// отбрасывается с ErrNotTaskOwner (ожидание продолжается — владелец
-// может доставить результат позже). Результат задачи, которой никто
-// не ждёт (например, истёк таймаут), отбрасывается молча.
+// клиента. Владелец задачи задан connection_id, и результат обязан
+// быть подписан ровно им: результат от другого подключения (включая
+// результат с пустым client_id) отбрасывается с ErrNotTaskOwner —
+// ожидание продолжается, владелец может доставить результат позже.
+// Результат задачи, которой никто не ждёт (например, истёк таймаут),
+// отбрасывается молча.
 func (p *ConnectionPool) HandleResult(res *pb.TaskResult) error {
 	p.mu.Lock()
 	e, ok := p.pending[res.TaskId]
-	if ok && res.ClientId != "" && res.ClientId != e.owner {
+	if ok && res.ClientId != e.owner {
 		p.mu.Unlock()
 		return connection.ErrNotTaskOwner
 	}
@@ -169,7 +197,8 @@ func (p *ConnectionPool) HandleResult(res *pb.TaskResult) error {
 	return nil
 }
 
-// ClientIDs возвращает отсортированный список id подключённых клиентов.
+// ClientIDs возвращает отсортированный список connection_id активных
+// подключений ({user_id}:{client_id}).
 func (p *ConnectionPool) ClientIDs() []string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -181,15 +210,15 @@ func (p *ConnectionPool) ClientIDs() []string {
 	return ids
 }
 
-// Has сообщает, подключён ли клиент с данным client_id.
-func (p *ConnectionPool) Has(clientID string) bool {
+// Has сообщает, активно ли подключение с данным connection_id.
+func (p *ConnectionPool) Has(connectionID string) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	_, ok := p.conns[clientID]
+	_, ok := p.conns[connectionID]
 	return ok
 }
 
-// SendTask отправляет задачу клиенту с id clientID и блокируется
+// SendTask отправляет задачу подключению connectionID и блокируется
 // до результата, таймаута задачи или отмены ctx.
 //
 // Потеря подключения клиента завершает ожидание ошибкой
@@ -203,9 +232,9 @@ func (p *ConnectionPool) Has(clientID string) bool {
 // со статусом STATUS_TIMEOUT и nil error; истечение дедлайна или отмена
 // ctx вызывающего кода возвращаются как ошибка ctx. Повторный вызов
 // с task_id, уже ожидающим результат, возвращает ErrTaskAlreadyPending.
-func (p *ConnectionPool) SendTask(ctx context.Context, clientID string, task *pb.Task) (*pb.TaskResult, error) {
+func (p *ConnectionPool) SendTask(ctx context.Context, connectionID string, task *pb.Task) (*pb.TaskResult, error) {
 	p.mu.RLock()
-	c := p.conns[clientID]
+	c := p.conns[connectionID]
 	p.mu.RUnlock()
 	if c == nil {
 		return nil, connection.ErrConnectionNotFound
@@ -220,7 +249,7 @@ func (p *ConnectionPool) SendTask(ctx context.Context, clientID string, task *pb
 	e := &pendingEntry{
 		resCh: make(chan *pb.TaskResult, 1),
 		errCh: make(chan error, 1),
-		owner: clientID,
+		owner: connectionID,
 	}
 	p.mu.Lock()
 	if _, exists := p.pending[task.Id]; exists {

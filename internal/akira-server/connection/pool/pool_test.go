@@ -22,8 +22,8 @@ func execTask(id string) *pb.Task {
 // сообщение о задаче не ушло клиенту, SendTask возвращает
 // ErrConnectionClosed, а не ждёт результата вечно.
 func TestSendTaskFailsWhenTaskNeverSent(t *testing.T) {
-	pool := New()
-	conn, err := pool.Register("c1")
+	pool := New(0) // без лимита подключений
+	conn, err := pool.Register("u1:c1", "u1")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestSendTaskFailsWhenTaskNeverSent(t *testing.T) {
 	go func() {
 		defer close(done)
 		// Писателя потока нет — сообщение остаётся в очереди подключения.
-		if _, err := pool.SendTask(context.Background(), "c1", execTask("")); err == nil || !errors.Is(err, connection.ErrConnectionClosed) {
+		if _, err := pool.SendTask(context.Background(), "u1:c1", execTask("")); err == nil || !errors.Is(err, connection.ErrConnectionClosed) {
 			t.Errorf("SendTask error = %v, want ErrConnectionClosed", err)
 		}
 	}()
@@ -53,15 +53,15 @@ func TestSendTaskFailsWhenTaskNeverSent(t *testing.T) {
 // забрал сообщение из очереди), но подключение потеряно — SendTask
 // возвращает ErrConnectionClosed, а не ждёт результата вечно.
 func TestSendTaskFailsWhenTaskSent(t *testing.T) {
-	pool := New()
-	conn, err := pool.Register("c1")
+	pool := New(0) // без лимита подключений
+	conn, err := pool.Register("u1:c1", "u1")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := pool.SendTask(context.Background(), "c1", execTask("sent-task"))
+		_, err := pool.SendTask(context.Background(), "u1:c1", execTask("sent-task"))
 		done <- err
 	}()
 
@@ -74,7 +74,7 @@ func TestSendTaskFailsWhenTaskSent(t *testing.T) {
 	}
 
 	// Подключение потеряно — результата можно не ждать.
-	pool.Disconnect("c1")
+	pool.Disconnect("u1:c1")
 	select {
 	case err := <-done:
 		if !errors.Is(err, connection.ErrConnectionClosed) {
@@ -89,20 +89,20 @@ func TestSendTaskFailsWhenTaskSent(t *testing.T) {
 // пока первая ждёт результата, возвращает ErrTaskAlreadyPending
 // и не затирает ожидание первой.
 func TestSendTaskDuplicateID(t *testing.T) {
-	pool := New()
-	conn, err := pool.Register("c1")
+	pool := New(0) // без лимита подключений
+	conn, err := pool.Register("u1:c1", "u1")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
 
 	first := make(chan error, 1)
 	go func() {
-		_, err := pool.SendTask(context.Background(), "c1", execTask("dup-task"))
+		_, err := pool.SendTask(context.Background(), "u1:c1", execTask("dup-task"))
 		first <- err
 	}()
 	time.Sleep(50 * time.Millisecond) // ждём регистрации записи в pending
 
-	if _, err := pool.SendTask(context.Background(), "c1", execTask("dup-task")); !errors.Is(err, connection.ErrTaskAlreadyPending) {
+	if _, err := pool.SendTask(context.Background(), "u1:c1", execTask("dup-task")); !errors.Is(err, connection.ErrTaskAlreadyPending) {
 		t.Fatalf("second SendTask error = %v, want ErrTaskAlreadyPending", err)
 	}
 
@@ -121,8 +121,8 @@ func TestSendTaskDuplicateID(t *testing.T) {
 // TestSendTaskTaskTimeout: таймаут задачи (task.timeout_ms) — это
 // STATUS_TIMEOUT, а не ошибка.
 func TestSendTaskTaskTimeout(t *testing.T) {
-	pool := New()
-	conn, err := pool.Register("c1")
+	pool := New(0) // без лимита подключений
+	conn, err := pool.Register("u1:c1", "u1")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestSendTaskTaskTimeout(t *testing.T) {
 
 	task := execTask("")
 	task.TimeoutMs = 50
-	res, err := pool.SendTask(context.Background(), "c1", task)
+	res, err := pool.SendTask(context.Background(), "u1:c1", task)
 	if err != nil {
 		t.Fatalf("SendTask: %v", err)
 	}
@@ -143,8 +143,8 @@ func TestSendTaskTaskTimeout(t *testing.T) {
 // это ошибка ctx, а не STATUS_TIMEOUT (который означает таймаут самой
 // задачи и при nil error неотличим от настоящего результата).
 func TestSendTaskCallerDeadline(t *testing.T) {
-	pool := New()
-	conn, err := pool.Register("c1")
+	pool := New(0) // без лимита подключений
+	conn, err := pool.Register("u1:c1", "u1")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestSendTaskCallerDeadline(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	res, err := pool.SendTask(ctx, "c1", execTask(""))
+	res, err := pool.SendTask(ctx, "u1:c1", execTask(""))
 	if err == nil {
 		t.Fatalf("expected ctx error, got result %v", res)
 	}
@@ -165,8 +165,8 @@ func TestSendTaskCallerDeadline(t *testing.T) {
 // отбрасывается (ErrNotTaskOwner), ожидание владельца продолжается
 // и завершается его собственным результатом.
 func TestHandleResultRejectsNonOwner(t *testing.T) {
-	pool := New()
-	conn, err := pool.Register("c1")
+	pool := New(0) // без лимита подключений
+	conn, err := pool.Register("u1:c1", "u1")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestHandleResultRejectsNonOwner(t *testing.T) {
 
 	resCh := make(chan *pb.TaskResult, 1)
 	go func() {
-		res, err := pool.SendTask(context.Background(), "c1", execTask("own-task"))
+		res, err := pool.SendTask(context.Background(), "u1:c1", execTask("own-task"))
 		if err != nil {
 			t.Errorf("SendTask: %v", err)
 			return
@@ -183,12 +183,12 @@ func TestHandleResultRejectsNonOwner(t *testing.T) {
 	}()
 	time.Sleep(50 * time.Millisecond) // ждём регистрации записи в pending
 
-	if err := pool.HandleResult(&pb.TaskResult{TaskId: "own-task", ClientId: "c2", Status: pb.TaskResult_STATUS_OK}); !errors.Is(err, connection.ErrNotTaskOwner) {
+	if err := pool.HandleResult(&pb.TaskResult{TaskId: "own-task", ClientId: "u2:c2", Status: pb.TaskResult_STATUS_OK}); !errors.Is(err, connection.ErrNotTaskOwner) {
 		t.Fatalf("HandleResult error = %v, want ErrNotTaskOwner", err)
 	}
 
 	// Результат настоящего владельца доставляется.
-	if err := pool.HandleResult(&pb.TaskResult{TaskId: "own-task", ClientId: "c1", Status: pb.TaskResult_STATUS_OK}); err != nil {
+	if err := pool.HandleResult(&pb.TaskResult{TaskId: "own-task", ClientId: "u1:c1", Status: pb.TaskResult_STATUS_OK}); err != nil {
 		t.Fatalf("owner result rejected: %v", err)
 	}
 	select {
@@ -198,5 +198,74 @@ func TestHandleResultRejectsNonOwner(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("owner result was not delivered")
+	}
+}
+
+// TestHandleResultRejectsEmptyOwner: владелец задачи задан явно, и
+// результат с пустым client_id не принимается за владельческий —
+// ожидание продолжает жить и завершается настоящим владельцем.
+func TestHandleResultRejectsEmptyOwner(t *testing.T) {
+	pool := New(0) // без лимита подключений
+	conn, err := pool.Register("u1:c1", "u1")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	defer pool.Unregister(conn)
+
+	resCh := make(chan *pb.TaskResult, 1)
+	go func() {
+		res, err := pool.SendTask(context.Background(), "u1:c1", execTask("anon-task"))
+		if err != nil {
+			t.Errorf("SendTask: %v", err)
+			return
+		}
+		resCh <- res
+	}()
+	time.Sleep(50 * time.Millisecond) // ждём регистрации записи в pending
+
+	if err := pool.HandleResult(&pb.TaskResult{TaskId: "anon-task", ClientId: "", Status: pb.TaskResult_STATUS_OK}); !errors.Is(err, connection.ErrNotTaskOwner) {
+		t.Fatalf("HandleResult error = %v, want ErrNotTaskOwner", err)
+	}
+
+	if err := pool.HandleResult(&pb.TaskResult{TaskId: "anon-task", ClientId: "u1:c1", Status: pb.TaskResult_STATUS_OK}); err != nil {
+		t.Fatalf("owner result rejected: %v", err)
+	}
+	select {
+	case res := <-resCh:
+		if res.Status != pb.TaskResult_STATUS_OK {
+			t.Fatalf("status = %v, want STATUS_OK", res.Status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("owner result was not delivered")
+	}
+}
+
+// TestMaxConnectionsPerUser: лимит считается по пользователю
+// (префикс {user_id}: connection_id), а не глобально; после разрыва
+// подключения место освобождается.
+func TestMaxConnectionsPerUser(t *testing.T) {
+	pool := New(2)
+
+	if _, err := pool.Register("u1:a", "u1"); err != nil {
+		t.Fatalf("register u1:a: %v", err)
+	}
+	if _, err := pool.Register("u1:b", "u1"); err != nil {
+		t.Fatalf("register u1:b: %v", err)
+	}
+	// Лимит пользователя исчерпан.
+	if _, err := pool.Register("u1:c", "u1"); !errors.Is(err, connection.ErrTooManyConnections) {
+		t.Fatalf("register u1:c error = %v, want ErrTooManyConnections", err)
+	}
+	// Другой пользователь под лимит первого не попадает.
+	if _, err := pool.Register("u2:a", "u2"); err != nil {
+		t.Fatalf("register u2:a: %v", err)
+	}
+
+	// Разрыв одного подключения освобождает место.
+	if !pool.Disconnect("u1:a") {
+		t.Fatal("Disconnect u1:a returned false")
+	}
+	if _, err := pool.Register("u1:c", "u1"); err != nil {
+		t.Fatalf("register u1:c after disconnect: %v", err)
 	}
 }

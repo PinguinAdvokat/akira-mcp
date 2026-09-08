@@ -1,5 +1,3 @@
-# Тестовый PostgreSQL для локальной разработки.
-# Запуск: docker compose up -d, остановка: docker compose down (флаг -v удалит данные).
 services:
   postgres:
     image: postgres:17

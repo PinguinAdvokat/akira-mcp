@@ -12,8 +12,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	authhttp "github.com/PinguinAdvokat/akira-mcp/internal/auth/httpapi"
+	authmail "github.com/PinguinAdvokat/akira-mcp/internal/auth/mail"
 	authstore "github.com/PinguinAdvokat/akira-mcp/internal/auth/store"
-	authstorememory "github.com/PinguinAdvokat/akira-mcp/internal/auth/store/memory"
+	authstorepostgres "github.com/PinguinAdvokat/akira-mcp/internal/auth/store/postgres"
 	authtoken "github.com/PinguinAdvokat/akira-mcp/internal/auth/token"
 	"github.com/joho/godotenv"
 )
@@ -65,26 +66,91 @@ func envDuration(logger *slog.Logger, name string, fallback time.Duration) time.
 }
 
 // bootstrapUser создаёт стартового пользователя из AUTH_BOOTSTRAP_*
-// (пароль хешируется bcrypt). Уже существующий — не ошибка.
+// (пароль хешируется bcrypt), сразу с подтверждённым email и выданным
+// connect_key. Если имя или email заняты — это либо наш пользователь
+// с прошлого запуска, либо чужой аккаунт: сверяем пароль и email
+// и при несовпадении отказываемся стартовать, чтобы оператор молча
+// не работал с чужой учётной записью.
 func bootstrapUser(ctx context.Context, logger *slog.Logger, store authstore.Store) {
-	username := os.Getenv("AUTH_BOOTSTRAP_USERNAME")
+	username := strings.TrimSpace(os.Getenv("AUTH_BOOTSTRAP_USERNAME"))
 	password := os.Getenv("AUTH_BOOTSTRAP_PASSWORD")
+	email := strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_BOOTSTRAP_EMAIL")))
 	if username == "" || password == "" {
 		return
+	}
+	if email == "" {
+		email = username + "@bootstrap.local"
+	}
+	// bcrypt молча обрезает пароль до 72 байт — явный отказ честнее.
+	if len(password) > 72 {
+		fatalf(logger, "AUTH_BOOTSTRAP_PASSWORD must be at most 72 bytes", "len", len(password))
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		fatalf(logger, "hash bootstrap password", "err", err)
 	}
-	if _, err := store.CreateUser(ctx, username, hash); err != nil {
-		if !errors.Is(err, authstore.ErrUserExists) {
-			fatalf(logger, "create bootstrap user", "err", err)
+
+	u, err := store.CreateUser(ctx, username, email, hash)
+	switch {
+	case err == nil:
+		// Новый пользователь: подтверждаем email и выдаём connect_key.
+		if err := store.VerifyEmail(ctx, u.ID); err != nil {
+			fatalf(logger, "verify bootstrap user email", "err", err)
 		}
-		logger.Info("bootstrap user already exists", "username", username)
-		return
+		if err := assignConnectKey(ctx, store, u.ID); err != nil {
+			fatalf(logger, "assign bootstrap connect key", "err", err)
+		}
+		logger.Info("bootstrap user created", "username", username, "email", email)
+	case errors.Is(err, authstore.ErrUserExists), errors.Is(err, authstore.ErrEmailExists):
+		ensureBootstrapUser(ctx, logger, store, username, email, password)
+	default:
+		fatalf(logger, "create bootstrap user", "err", err)
 	}
-	logger.Info("bootstrap user created", "username", username)
+}
+
+// ensureBootstrapUser разбирает занятое имя/email при старте. Имя ищется
+// в хранилище: если его нет — конфликт был по email (он принадлежит
+// другому аккаунту), это фатально. Найденный пользователь обязан
+// совпадать по паролю и email с AUTH_BOOTSTRAP_* — тогда это наш
+// пользователь с прошлого запуска и недостающее (подтверждение email,
+// connect_key — например, оставшийся пустым до этой правки) доводится
+// до конца. Пароль или email не совпали — чужой сквоттер, отказ.
+func ensureBootstrapUser(ctx context.Context, logger *slog.Logger, store authstore.Store, username, email, password string) {
+	u, err := store.GetUserByUsername(ctx, username)
+	if err != nil {
+		if errors.Is(err, authstore.ErrUserNotFound) {
+			// Имя свободно — значит, занят email.
+			fatalf(logger, "AUTH_BOOTSTRAP_EMAIL is already taken by another account", "email", email)
+		}
+		fatalf(logger, "load existing bootstrap user", "err", err)
+	}
+	if bcrypt.CompareHashAndPassword(u.PasswordHash, []byte(password)) != nil {
+		fatalf(logger, "bootstrap username is taken by an account with a different password (squatting?): refusing to start; change AUTH_BOOTSTRAP_USERNAME or remove the existing account", "username", username)
+	}
+	if u.Email != email {
+		fatalf(logger, "bootstrap username exists with a different email", "username", username, "existing_email", u.Email, "configured_email", email)
+	}
+	if !u.EmailVerified {
+		if err := store.VerifyEmail(ctx, u.ID); err != nil {
+			fatalf(logger, "verify bootstrap user email", "err", err)
+		}
+	}
+	if u.ConnectKey == "" {
+		if err := assignConnectKey(ctx, store, u.ID); err != nil {
+			fatalf(logger, "assign bootstrap connect key", "err", err)
+		}
+	}
+	logger.Info("bootstrap user already exists", "username", username, "email", email)
+}
+
+// assignConnectKey генерирует и сохраняет connect_key пользователя.
+func assignConnectKey(ctx context.Context, store authstore.Store, userID string) error {
+	key, err := authstore.GenerateConnectKey()
+	if err != nil {
+		return err
+	}
+	return store.SetConnectKey(ctx, userID, key)
 }
 
 func main() {
@@ -104,6 +170,7 @@ func main() {
 	}
 	accessTTL := envDuration(logger, "AUTH_ACCESS_TTL", 15*time.Minute)
 	refreshTTL := envDuration(logger, "AUTH_REFRESH_TTL", 720*time.Hour)
+	emailTTL := envDuration(logger, "AUTH_EMAIL_TTL", 15*time.Minute)
 
 	// Ключи генерируются на старте и живут в памяти: после рестарта
 	// kid меняется и все старые токены невалидны (см. пакет authtoken).
@@ -112,12 +179,29 @@ func main() {
 		fatalf(logger, "token manager init failed", "err", err)
 	}
 
-	store := authstorememory.New()
+	// Хранилище — Postgres (схема создаётся миграциями при подключении).
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		fatalf(logger, "DATABASE_URL is required")
+	}
+	logger.Info("connecting to postgres", "migrations", "applying at startup")
+	store, err := authstorepostgres.New(context.Background(), databaseURL)
+	if err != nil {
+		fatalf(logger, "postgres store init failed", "err", err)
+	}
+	defer store.Close()
 	bootstrapUser(context.Background(), logger, store)
 
+	// Отправитель писем: SMTP, если задан SMTP_HOST, иначе коды
+	// подтверждения пишутся в лог (режим локальной разработки).
+	mail := authmail.New(authmail.ConfigFromEnv(), logger)
+
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           authhttp.New(tokens, store),
+		Addr: addr,
+		Handler: authhttp.New(tokens, store, authhttp.Config{
+			Mail:     mail,
+			EmailTTL: emailTTL,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,

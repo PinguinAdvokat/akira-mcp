@@ -58,9 +58,9 @@ func execTask(ctx context.Context, t *pb.ExecTask) *pb.TaskResult {
 	runErr := cmd.Run()
 
 	res := &pb.TaskResult{
-		Stdout:    stdout.Bytes(),
-		Stderr:    stderr.Bytes(),
-		ExitCode:  int32(cmd.ProcessState.ExitCode()),
+		Stdout:   stdout.Bytes(),
+		Stderr:   stderr.Bytes(),
+		ExitCode: int32(cmd.ProcessState.ExitCode()),
 	}
 	if runErr != nil {
 		res.Status = pb.TaskResult_STATUS_ERROR

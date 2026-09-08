@@ -7,17 +7,20 @@ import (
 )
 
 var (
-	// ErrAlreadyRegistered — клиент с таким client_id уже подключен.
+	// ErrAlreadyRegistered — подключение с таким connection_id уже активно.
 	ErrAlreadyRegistered = errors.New("connectionpool: client already registered")
-	// ErrConnectionNotFound — активного подключения с таким client_id нет.
+	// ErrConnectionNotFound — активного подключения с таким connection_id нет.
 	ErrConnectionNotFound = errors.New("connectionpool: connection not found")
 	// ErrConnectionClosed — подключение закрыто.
 	ErrConnectionClosed = errors.New("connectionpool: connection closed")
 	// ErrTaskAlreadyPending — задача с таким task_id уже ожидает результат.
 	ErrTaskAlreadyPending = errors.New("connectionpool: task id is already pending")
-	// ErrNotTaskOwner — результат прислал не тот клиент, которому
+	// ErrNotTaskOwner — результат прислало не то подключение, которому
 	// отправлена задача.
 	ErrNotTaskOwner = errors.New("connectionpool: result submitted by a non-owner client")
+	// ErrTooManyConnections — пользователь превысил лимит одновременных
+	// подключений (MAX_CONNECTIONS).
+	ErrTooManyConnections = errors.New("connectionpool: too many connections for user")
 )
 
 // newID возвращает случайный hex-идентификатор (session_id / task id).

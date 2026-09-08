@@ -11,6 +11,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -24,7 +25,7 @@ import (
 )
 
 // defaultRetryDelay — пауза между попытками переподключения по умолчанию.
-const defaultRetryDelay = time.Second
+const defaultRetryDelay = 3 * time.Second
 
 // defaultHeartbeatMs используется, если сервер не сообщил интервал пинга.
 const defaultHeartbeatMs = 30_000
@@ -40,16 +41,24 @@ type Config struct {
 	// и не меняется, поэтому при переподключении сервер видит тот же
 	// id подключения.
 	ClientID string
+	// ConnectKey — короткий ключ пользователя из auth-сервиса:
+	// по нему сервер определяет владельца подключения.
+	ConnectKey string
 	// RetryDelay — пауза между попытками переподключения и между
 	// повторными попытками доставки результата (SubmitResult); 0 = 3с.
 	RetryDelay time.Duration
 }
 
 // Run подключается к серверу и поддерживает соединение, переподключаясь
-// после разрывов, пока ctx не отменят.
+// после разрывов, пока ctx не отменят. Причиной отказа может быть
+// заведомо нерешаемый ключ (неизвестный connect_key, неподтверждённый
+// email) — в этом случае Run возвращает ошибку без ретраев.
 func Run(ctx context.Context, cfg Config) error {
 	if cfg.ClientID == "" {
 		return errors.New("client_id is not set")
+	}
+	if cfg.ConnectKey == "" {
+		return errors.New("connect_key is not set")
 	}
 	retry := cfg.RetryDelay
 	if retry <= 0 {
@@ -75,13 +84,25 @@ func Run(ctx context.Context, cfg Config) error {
 
 	// outbox живёт на уровне Run, а не сессии: результаты задач,
 	// завершившихся во время разрыва соединения, хранятся в очереди
-	// и доставляются после переподключения.
+	// и доставляются после переподключения. connection_id приходит
+	// с первым ack и стабилен для пары user+client (вычисляется
+	// из connect_key и client_id), поэтому подпись результатов
+	// переживает переподключения.
 	ob := newOutbox()
-	go submitLoop(ctx, client, ob, cfg.ClientID, retry)
+	var connID atomic.Pointer[string]
+	go submitLoop(ctx, client, ob, &connID, retry)
 
 	log.Printf("connecting to %s, client_id=%s", cfg.ServerAddr, cfg.ClientID)
 	for {
-		if err := runSession(ctx, client, cfg.ClientID, ob); err != nil && ctx.Err() == nil {
+		err := runSession(ctx, client, cfg, ob, &connID)
+		if err != nil && ctx.Err() == nil {
+			if isFatalConnectError(err) {
+				// Неизвестный connect_key или неподтверждённый email:
+				// повтор не изменит исхода.
+				log.Printf("connect rejected: %v; giving up (check connect_key)", err)
+				ob.stop()
+				return err
+			}
 			log.Printf("connection lost: %v; reconnecting in %s", err, retry)
 		}
 		select {
@@ -92,21 +113,35 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 }
 
+// isFatalConnectError сообщает, бессмысленно ли переподключаться
+// после такой ошибки Connect: неверный ключ никогда не станет верным
+// сам собой.
+func isFatalConnectError(err error) bool {
+	s, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	return s.Code() == codes.Unauthenticated || s.Code() == codes.PermissionDenied
+}
+
 // runSession устанавливает подключение, регистрируется с client_id
-// и обслуживает поток до разрыва или отмены ctx.
-func runSession(ctx context.Context, client pb.ConnectionServiceClient, clientID string, ob *outbox) error {
+// и connect_key и обслуживает поток до разрыва или отмены ctx.
+func runSession(ctx context.Context, client pb.ConnectionServiceClient, cfg Config, ob *outbox, connID *atomic.Pointer[string]) error {
 	// sctx живёт, пока жива сессия: по нему создаётся поток Connect
 	// и работает heartbeat; отмена sctx (например, при сбое heartbeat)
 	// рвёт и поток, и heartbeat-горутину.
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Регистрация выполняется самим запросом Connect; сервер присылает
-	// RegisterResponse первым сообщением одностороннего потока.
+	// Регистрация выполняется самим запросом Connect; сервер находит
+	// пользователя по connect_key и присылает RegisterResponse первым
+	// сообщением одностороннего потока — с назначенным connection_id
+	// ({user_id}:{client_id}), которым подписываются результаты задач.
 	stream, err := client.Connect(sctx, &pb.RegisterRequest{
-		ClientId: clientID,
-		Hostname: hostname(),
-		Platform: runtime.GOOS,
+		ClientId:   cfg.ClientID,
+		Hostname:   hostname(),
+		Platform:   runtime.GOOS,
+		ConnectKey: cfg.ConnectKey,
 	})
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
@@ -120,7 +155,11 @@ func runSession(ctx context.Context, client pb.ConnectionServiceClient, clientID
 	if ack == nil {
 		return fmt.Errorf("expected RegisterResponse as the first message, got %T", msg.Payload)
 	}
-	log.Printf("registered: session_id=%s", ack.SessionId)
+	if ack.ConnectionId != "" {
+		id := ack.ConnectionId
+		connID.Store(&id)
+	}
+	log.Printf("registered: session_id=%s connection_id=%s", ack.SessionId, ack.ConnectionId)
 
 	go heartbeat(sctx, cancel, client, ack.HeartbeatIntervalMs)
 
@@ -284,13 +323,15 @@ func permanentSubmitError(err error) bool {
 }
 
 // submitLoop доставляет результаты из outbox на сервер через
-// SubmitResult, подписывая их client_id. При временной ошибке (нет
-// соединения) результат остаётся в очереди, и попытка повторяется
-// через retry — так результат доживает до переподключения. При
-// постоянной ошибке результат отбрасывается с логом: повторение
-// не поможет, а копание в очереди навсегда заблокировало бы
-// доставку остальных результатов.
-func submitLoop(ctx context.Context, client pb.ConnectionServiceClient, ob *outbox, clientID string, retry time.Duration) {
+// SubmitResult, подписывая их connection_id из RegisterResponse.
+// connection_id стабилен для пары user+client, поэтому подпись верна
+// и для результатов, поставленных в очередь до переподключения.
+// При временной ошибке (нет соединения) результат остаётся в очереди,
+// и попытка повторяется через retry — так результат доживает до
+// переподключения. При постоянной ошибке результат отбрасывается
+// с логом: повторение не поможет, а копание в очереди навсегда
+// заблокировало бы доставку остальных результатов.
+func submitLoop(ctx context.Context, client pb.ConnectionServiceClient, ob *outbox, connID *atomic.Pointer[string], retry time.Duration) {
 	defer ob.stop()
 	for {
 		select {
@@ -303,7 +344,12 @@ func submitLoop(ctx context.Context, client pb.ConnectionServiceClient, ob *outb
 			if !ok {
 				break
 			}
-			res.ClientId = clientID
+			// Штампуем актуальный connection_id при каждой попытке:
+			// задача могла быть поставлена в очередь до регистрации
+			// или при предыдущем ключе пользователя.
+			if id := connID.Load(); id != nil {
+				res.ClientId = *id
+			}
 			_, err := client.SubmitResult(ctx, res)
 			if err == nil {
 				ob.pop()

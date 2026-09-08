@@ -206,7 +206,10 @@ type RegisterRequest struct {
 	ClientId string `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	Hostname string `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
 	// platform — целевая ОС: linux / darwin / windows.
-	Platform      string `protobuf:"bytes,3,opt,name=platform,proto3" json:"platform,omitempty"`
+	Platform string `protobuf:"bytes,3,opt,name=platform,proto3" json:"platform,omitempty"`
+	// connect_key — короткий ключ пользователя из auth-сервиса;
+	// по нему сервер находит владельца подключения. Обязателен.
+	ConnectKey    string `protobuf:"bytes,4,opt,name=connect_key,json=connectKey,proto3" json:"connect_key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -262,14 +265,24 @@ func (x *RegisterRequest) GetPlatform() string {
 	return ""
 }
 
+func (x *RegisterRequest) GetConnectKey() string {
+	if x != nil {
+		return x.ConnectKey
+	}
+	return ""
+}
+
 // RegisterResponse — первое сообщение потока после регистрации.
 type RegisterResponse struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	// heartbeat_interval_ms — период вызова Ping клиентом.
 	HeartbeatIntervalMs int64 `protobuf:"varint,2,opt,name=heartbeat_interval_ms,json=heartbeatIntervalMs,proto3" json:"heartbeat_interval_ms,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// connection_id — назначенный сервером ключ подключения
+	// формата {user_id}:{client_id}. Клиент подписывает им TaskResult.
+	ConnectionId  string `protobuf:"bytes,3,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RegisterResponse) Reset() {
@@ -314,6 +327,13 @@ func (x *RegisterResponse) GetHeartbeatIntervalMs() int64 {
 		return x.HeartbeatIntervalMs
 	}
 	return 0
+}
+
+func (x *RegisterResponse) GetConnectionId() string {
+	if x != nil {
+		return x.ConnectionId
+	}
+	return ""
 }
 
 type Ping struct {
@@ -704,8 +724,9 @@ type TaskResult struct {
 	Error string `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
 	// duration_ms — фактическое время исполнения.
 	DurationMs int64 `protobuf:"varint,7,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
-	// client_id — идентификатор клиента, исполнившего задачу.
-	// Сервер сверяет его с владельцем ожидающей задачи; пустое значение
+	// connection_id — ключ подключения, исполнившего задачу
+	// ({user_id}:{client_id}, выдаётся в RegisterResponse). Сервер
+	// сверяет его с владельцем ожидающей задачи; пустое значение
 	// принимается (совместимость со старыми клиентами).
 	ClientId      string `protobuf:"bytes,8,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -807,15 +828,18 @@ const file_connection_v1_connection_proto_rawDesc = "" +
 	"\fregister_ack\x18\x01 \x01(\v2%.akira.connection.v1.RegisterResponseH\x00R\vregisterAck\x12/\n" +
 	"\x04task\x18\x02 \x01(\v2\x19.akira.connection.v1.TaskH\x00R\x04taskB\t\n" +
 	"\apayload\"\x16\n" +
-	"\x14SubmitResultResponse\"f\n" +
+	"\x14SubmitResultResponse\"\x87\x01\n" +
 	"\x0fRegisterRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1a\n" +
-	"\bplatform\x18\x03 \x01(\tR\bplatform\"e\n" +
+	"\bplatform\x18\x03 \x01(\tR\bplatform\x12\x1f\n" +
+	"\vconnect_key\x18\x04 \x01(\tR\n" +
+	"connectKey\"\x8a\x01\n" +
 	"\x10RegisterResponse\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x122\n" +
-	"\x15heartbeat_interval_ms\x18\x02 \x01(\x03R\x13heartbeatIntervalMs\"\x18\n" +
+	"\x15heartbeat_interval_ms\x18\x02 \x01(\x03R\x13heartbeatIntervalMs\x12#\n" +
+	"\rconnection_id\x18\x03 \x01(\tR\fconnectionId\"\x18\n" +
 	"\x04Ping\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\"\x18\n" +
 	"\x04Pong\x12\x10\n" +

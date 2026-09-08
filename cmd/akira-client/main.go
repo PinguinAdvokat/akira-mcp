@@ -13,6 +13,8 @@ var (
 	serverAddr = flag.String("server", "localhost:5000", "akira-server address (host:port)")
 	// clientID — уникальный идентификатор клиента, задаётся флагом -client-id.
 	clientID = flag.String("client-id", "", "unique client id (required)")
+	// connectKey — короткий ключ пользователя из auth-сервиса.
+	connectKey = flag.String("connect-key", "", "user connect key from the auth service (required)")
 	// retryDelay — пауза между попытками переподключения.
 	retryDelay = flag.Duration("retry-delay", 0, "pause between reconnect attempts (0 = 3s)")
 )
@@ -22,13 +24,18 @@ func main() {
 	if *clientID == "" {
 		log.Fatal("the -client-id flag is required")
 	}
+	if *connectKey == "" {
+		log.Fatal("the -connect-key flag is required")
+	}
 
 	// Логика подключения — в internal/akira-client/connection:
 	// client_id не меняется, при разрыве клиент переподключается
-	// с тем же id, выполняемые задачи не прерываются.
+	// с тем же id, выполняемые задачи не прерываются. Пользователь
+	// определяется сервером по connect_key.
 	if err := connection.Run(context.Background(), connection.Config{
 		ServerAddr: *serverAddr,
 		ClientID:   *clientID,
+		ConnectKey: *connectKey,
 		RetryDelay: *retryDelay,
 	}); err != nil {
 		log.Fatal(err)

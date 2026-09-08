@@ -2,6 +2,7 @@ package connectionserver
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
+	"github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection"
 	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/pool"
 	pb "github.com/PinguinAdvokat/akira-mcp/pkg/api/connectionpb/v1"
 )
@@ -18,16 +20,37 @@ import (
 // при регистрации.
 const HeartbeatIntervalMs = 30_000
 
+// ErrUnknownConnectKey — connect_key не найден: пользователя нет или
+// ключ ещё не выдан. Адаптеры UserLookup транслируют сюда «пользователь
+// не найден» из хранилища (сам пакет не зависит от authstore). Прочие
+// ошибки поиска (например, недоступная БД) возвращаются адаптером
+// как есть: Connect отвечает на них codes.Internal, и клиент
+// переподключается с повторными попытками, а не выходит, как при
+// Unauthenticated.
+var ErrUnknownConnectKey = errors.New("connectionserver: unknown connect key")
+
+// UserLookup — поиск пользователя по connect_key (реализация —
+// authstore поверх общей БД). Узкий интерфейс, чтобы сервер не зависел
+// от хранилища целиком.
+type UserLookup interface {
+	// LookupConnectKey возвращает id и признак подтверждённости email
+	// пользователя, владеющего connect_key. Неизвестный ключ —
+	// ErrUnknownConnectKey; прочие ошибки хранилища возвращаются как есть.
+	LookupConnectKey(ctx context.Context, connectKey string) (userID string, verified bool, err error)
+}
+
 // ConnectionServer реализует akira.connection.v1.ConnectionService.
 type ConnectionServer struct {
 	pb.UnimplementedConnectionServiceServer
 	pool   *connectionpool.ConnectionPool
+	users  UserLookup
 	logger *slog.Logger
 }
 
-func New(pool *connectionpool.ConnectionPool) *ConnectionServer {
+func New(pool *connectionpool.ConnectionPool, users UserLookup) *ConnectionServer {
 	return &ConnectionServer{
 		pool:   pool,
+		users:  users,
 		logger: slog.Default().With(slog.String("component", "connectionServer")),
 	}
 }
@@ -38,30 +61,60 @@ func New(pool *connectionpool.ConnectionPool) *ConnectionServer {
 // примерно за Time+Timeout (~80с). Без этого призрачная регистрация
 // держала бы client_id до таймаута стека TCP (~15 минут) и блокировала
 // переподключение клиента ошибкой AlreadyExists.
-func NewGRPCServer(pool *connectionpool.ConnectionPool) *grpc.Server {
+func NewGRPCServer(pool *connectionpool.ConnectionPool, users UserLookup) *grpc.Server {
 	grpcServer := grpc.NewServer(grpc.KeepaliveParams(keepalive.ServerParameters{
 		Time:    60 * time.Second,
 		Timeout: 20 * time.Second,
 	}))
-	pb.RegisterConnectionServiceServer(grpcServer, New(pool))
+	pb.RegisterConnectionServiceServer(grpcServer, New(pool, users))
 	return grpcServer
 }
 
 // Connect регистрирует клиента (самим запросом) и открывает
-// односторонний поток сервер→клиент. Первое сообщение потока —
-// RegisterResponse, далее сервер присылает Task.
+// односторонний поток сервер→клиент. Пользователь находится по
+// connect_key из запроса; подключение регистрируется в пуле под
+// connection_id формата {user_id}:{client_id}, который возвращается
+// клиенту в RegisterResponse и подписывает его TaskResult. Первое
+// сообщение потока — RegisterResponse, далее сервер присылает Task.
 func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.ConnectionService_ConnectServer) error {
-	if reg == nil || reg.ClientId == "" {
+	if reg == nil || reg.ClientId == "" || reg.ConnectKey == "" {
 		s.logger.Warn("invalid register request", "client_id", reg.GetClientId())
-		return status.Error(codes.InvalidArgument, "register request must have client_id")
+		return status.Error(codes.InvalidArgument, "register request must have client_id and connect_key")
 	}
 
-	logger := s.logger.With(slog.String("client_id", reg.ClientId))
+	// Пользователь по connect_key: без ключа подключения нет, без
+	// подтверждённого email — тоже (ключ выдаётся только верифицированным).
+	userID, verified, err := s.users.LookupConnectKey(stream.Context(), reg.ConnectKey)
+	if err != nil {
+		if errors.Is(err, ErrUnknownConnectKey) {
+			// Неизвестный ключ не станет валидным — фатальная для клиента
+			// ошибка (Unauthenticated).
+			s.logger.Warn("connect key lookup failed", "err", err)
+			return status.Error(codes.Unauthenticated, "unknown connect key")
+		}
+		// Прочие ошибки (недоступная БД и т.п.) — транзиентные: Internal,
+		// клиент пережидает и пробует снова. Раньше любая ошибка поиска
+		// превращалась в Unauthenticated и клиент завершался.
+		s.logger.Error("connect key lookup error", "err", err)
+		return status.Error(codes.Internal, "connect key lookup failed")
+	}
+	if !verified {
+		s.logger.Warn("connect key owner is not verified", "user_id", userID)
+		return status.Error(codes.PermissionDenied, "email is not verified")
+	}
 
-	conn, err := s.pool.Register(reg.ClientId)
+	connectionID := userID + ":" + reg.ClientId
+	logger := s.logger.With(slog.String("connection_id", connectionID))
+
+	conn, err := s.pool.Register(connectionID, userID)
 	if err != nil {
 		logger.Warn("register failed", "err", err)
-		return status.Error(codes.AlreadyExists, err.Error())
+		switch {
+		case errors.Is(err, connection.ErrTooManyConnections):
+			return status.Error(codes.ResourceExhausted, err.Error())
+		default:
+			return status.Error(codes.AlreadyExists, err.Error())
+		}
 	}
 	defer s.pool.Unregister(conn)
 
@@ -71,6 +124,7 @@ func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.Connection
 			RegisterAck: &pb.RegisterResponse{
 				SessionId:           conn.SessionID,
 				HeartbeatIntervalMs: HeartbeatIntervalMs,
+				ConnectionId:        connectionID,
 			},
 		},
 	}); err != nil {
@@ -117,6 +171,12 @@ func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.Connection
 func (s *ConnectionServer) SubmitResult(ctx context.Context, res *pb.TaskResult) (*pb.SubmitResultResponse, error) {
 	if res == nil || res.TaskId == "" {
 		return nil, status.Error(codes.InvalidArgument, "result must have task_id")
+	}
+	// Владелец задачи задан connection_id; пустой client_id не может
+	// быть «владельческим» — иначе результат без подписи принимался бы
+	// за результат владельца.
+	if res.ClientId == "" {
+		return nil, status.Error(codes.InvalidArgument, "result must have client_id (connection_id from the register ack)")
 	}
 	// Результат задачи, которой никто не ждёт, отбрасывается молча —
 	// нормальная ситуация после таймаута на стороне сервера.
