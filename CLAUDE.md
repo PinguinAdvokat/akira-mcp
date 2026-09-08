@@ -14,11 +14,12 @@ go test ./internal/... -run TestName -v               # single test
 go run ./cmd/akira-server                              # run server
 go run ./cmd/akira-repl                                # server + stdin REPL for manual testing
 go run ./cmd/akira-client -client-id <id> [-server host:port]   # run client executor
+go run ./cmd/auth                                      # run auth service (JWT + JWKS)
 ```
 
 protoc and Go plugins come from `nix-shell` (see `shell.nix`). Proto → Go mapping is defined by the Makefile (`module=` option), not by go_package alone: `api/connection/v1/connection.proto` generates into `pkg/api/connectionpb/v1`. Never edit `*.pb.go` by hand — change the proto and run `make proto`.
 
-Env vars (`.env` loaded via godotenv in server and repl): `LISTEN` (listen address, default `":5000"`, read by both). `LOG_LEVEL` (debug|info|warn|error) and `LOG_FORMAT` (text|json) are read **only by akira-server**; the repl hardcodes a text handler on stderr. The `AKIRA_*`/`HOST_ID` vars currently in `.env` are not read by any code.
+Env vars (`.env` loaded via godotenv in server, repl and auth): `LISTEN` (listen address, default `":5000"`, read by both server and repl); auth service reads `AUTH_LISTEN` (default `":6000"`), `AUTH_ISSUER` (default `"akira"`, becomes the `iss` claim), `AUTH_ACCESS_TTL` (default `"15m"`), `AUTH_REFRESH_TTL` (default `"720h"`), `AUTH_BOOTSTRAP_USERNAME`/`AUTH_BOOTSTRAP_PASSWORD` (startup user, bcrypt-hashed). `LOG_LEVEL` (debug|info|warn|error) and `LOG_FORMAT` (text|json) are read **only by akira-server and auth**; the repl hardcodes a text handler on stderr. The `AKIRA_*`/`HOST_ID` vars currently in `.env` are not read by any code.
 
 ## Architecture
 
@@ -32,6 +33,12 @@ Server side of a reverse-command channel: each client holds a long-lived one-way
 - **`internal/akira-client/connection`** — client-side connection logic: register (via the `Connect` request), heartbeat (interval from `RegisterResponse`, 30s default; each call has a per-call deadline and the first failure tears down the session to force a reconnect), task receive loop, result outbox, reconnect loop reusing the same `client_id` after disconnects. The gRPC channel uses client keepalive (30s ping / 10s timeout) so silent partitions are detected in ~40s instead of the ~15-minute TCP retransmit timeout. `submitLoop` stamps results with `client_id` and **drops** results on permanent `SubmitResult` errors (e.g. `ResourceExhausted` for oversized results) instead of retrying forever — otherwise one poisoned result would wedge the whole FIFO outbox. `cmd/akira-client` is a thin entrypoint: flags → `connection.Run`.
 - **`internal/akira-client/executor`** — task execution (exec via shell, read/write file). Runs on its own context bound only to `task.timeout_ms` — never to the stream.
 - **`cmd/akira-repl`** — manual testing tool: starts the same gRPC server, then reads stdin commands (`list`, `use <client-id>`, `exec|read|write [client] ...`, `timeout <ms>`, `quit`).
+
+Auth service — standalone HTTP/JSON (plain `net/http`, deliberately **not** gRPC since JWKS is HTTP by nature); issues JWTs and publishes the public key so consumers validate tokens autonomously:
+
+- **`internal/auth/token`** (package `authtoken`) — `Manager` issues access JWTs (RS256, RSA-2048 generated at startup, random `kid` per run; claims `iss`, `sub`, `jti`, `iat`, `exp`, `typ="access"`) and opaque refresh tokens (32 random bytes base64url to the client, only sha256 hash stored). `JWKS()` returns the cached public key set (`jwk` with `kid`/`alg`/`use`); `ParseAccessToken` verifies via the same JWKS path a consumer would. Keys live in memory only: after a restart the `kid` changes and all previously issued tokens become invalid — consumers should re-fetch the JWKS on unknown `kid`. Key rotation is out of scope.
+- **`internal/auth/store`** (package `authstore`) — DB abstraction over users (bcrypt hashes; plaintext never reaches the store) and refresh tokens, designed for a future Postgres implementation; currently only `internal/auth/store/memory` (package `authstorememory`, mutex-guarded maps). `ConsumeRefresh` is atomic lookup+delete — refresh tokens are single-use (rotation = consumption), so a replayed old token fails with `ErrRefreshNotFound`, which doubles as revocation-on-rotation. Revoke-reuse-family detection is out of scope.
+- **`internal/auth/httpapi`** (package `authhttp`) — routes: `POST /token` (`grant_type=password` or `refresh_token`, OAuth2-ish shapes and error codes), `GET /jwks.json` + `GET /.well-known/jwks.json` (`Cache-Control: max-age=60`), `POST /revoke` (idempotent 204), `GET /healthz`. Same 401 `invalid_grant` for wrong password and unknown user (anti-enumeration). Tokens are never logged. `cmd/auth` is a thin entrypoint mirroring `cmd/akira-server` (godotenv, own `newLogger`/`fatalf`, http.Server with timeouts, no graceful shutdown). `httpapi_test.go` verifies a token end-to-end the way a downstream service would (fetch JWKS → `jwt.Parse` with `WithKeySet`).
 
 Key invariants when modifying either side:
 
