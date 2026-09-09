@@ -86,11 +86,13 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// purgeExpired удаляет протухшие refresh-токены и коды подтверждения:
-// потреблены они уже не будут, а копить их незачем. Вызывается один раз
-// при старте, чтобы не добавлять нагрузку на каждый запрос; очистка
-// best-effort — при неудаче строки просто дождутся следующего старта.
+// purgeExpired удаляет протухшие refresh-токены, коды подтверждения
+// и коды авторизации: потреблены они уже не будут, а копить их незачем.
+// Вызывается один раз при старте, чтобы не добавлять нагрузку на каждый
+// запрос; очистка best-effort — при неудаче строки просто дождутся
+// следующего старта.
 func purgeExpired(ctx context.Context, pool *pgxpool.Pool) {
 	_, _ = pool.Exec(ctx, `DELETE FROM refresh_tokens WHERE expires_at < now()`)
 	_, _ = pool.Exec(ctx, `DELETE FROM email_verifications WHERE expires_at < now()`)
+	_, _ = pool.Exec(ctx, `DELETE FROM oauth_codes WHERE expires_at < now()`)
 }

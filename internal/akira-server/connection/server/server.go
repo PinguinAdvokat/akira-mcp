@@ -106,7 +106,10 @@ func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.Connection
 	connectionID := userID + ":" + reg.ClientId
 	logger := s.logger.With(slog.String("connection_id", connectionID))
 
-	conn, err := s.pool.Register(connectionID, userID)
+	conn, err := s.pool.Register(connectionID, userID, connectionpool.ClientInfo{
+		Hostname: reg.GetHostname(),
+		Platform: reg.GetPlatform(),
+	})
 	if err != nil {
 		logger.Warn("register failed", "err", err)
 		switch {

@@ -5,12 +5,15 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	connectionpool "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/pool"
 	connectionserver "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/server"
+	akiramcp "github.com/PinguinAdvokat/akira-mcp/internal/akira-server/mcp"
 	authstore "github.com/PinguinAdvokat/akira-mcp/internal/auth/store"
 	authstorepostgres "github.com/PinguinAdvokat/akira-mcp/internal/auth/store/postgres"
 	"github.com/joho/godotenv"
@@ -85,6 +88,30 @@ func maxConnections(logger *slog.Logger) int {
 	return n
 }
 
+// envOr возвращает значение переменной окружения или значение
+// по умолчанию, если переменная пуста.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// envMs читает переменную окружения с числом миллисекунд;
+// непустое некорректное значение фатально (как MAX_CONNECTIONS —
+// молчаливый отход к умолчанию скрыл бы опечатку).
+func envMs(key string, def int, logger *slog.Logger) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		fatalf(logger, "invalid "+key, "value", raw, "err", err)
+	}
+	return n
+}
+
 func main() {
 	_ = godotenv.Load()
 
@@ -123,7 +150,57 @@ func main() {
 	// полумёртвые соединения закрываются, не блокируя переподключение.
 	grpcServer := connectionserver.NewGRPCServer(pool, storeLookup{store: store})
 
-	logger.Info("akira-server listening", "addr", addr, "max_connections", maxConns)
+	// MCP-сервер — второй листенер того же процесса: LLM через него
+	// управляет машинами пользователей (tools exec/write_file,
+	// ресурсы akira://machines и akira://file/...). Авторизация —
+	// access-токены auth-сервиса, проверяемые по его JWKS; OAuth-флоу
+	// начинается с 401 + resource_metadata (RFC 9728), поэтому нужны
+	// публичные адреса MCP-листенера и auth-сервиса.
+	mcpAddr := envOr("MCP_LISTEN", ":7000")
+	mcpTaskTimeoutMs := envMs("MCP_TASK_TIMEOUT_MS", 120_000, logger)
+	mcpReadMaxBytes := envMs("MCP_READ_MAX_BYTES", 1<<20, logger)
+	mcpPublicURL := envOr("MCP_PUBLIC_URL", "http://127.0.0.1:7000")
+	mcpAuthServerURL := envOr("MCP_AUTH_SERVER_URL", "http://127.0.0.1:6000")
+	validator, err := akiramcp.NewTokenValidator(context.Background(),
+		envOr("MCP_JWKS_URL", "http://127.0.0.1:6000/jwks.json"),
+		envOr("MCP_AUTH_ISSUER", "akira"),
+	)
+	if err != nil {
+		fatalf(logger, "mcp token validator init failed", "err", err)
+	}
+	mcpHandler, err := akiramcp.New(akiramcp.Config{
+		Pool:          pool,
+		Validator:     validator,
+		TaskTimeoutMs: mcpTaskTimeoutMs,
+		ReadMaxBytes:  mcpReadMaxBytes,
+		PublicURL:     mcpPublicURL,
+		AuthServerURL: mcpAuthServerURL,
+		Logger:        logger,
+	})
+	if err != nil {
+		fatalf(logger, "mcp server init failed", "err", err)
+	}
+	mcpLis, err := net.Listen("tcp", mcpAddr)
+	if err != nil {
+		fatalf(logger, "mcp listen failed", "addr", mcpAddr, "err", err)
+	}
+	mcpHTTP := &http.Server{
+		Handler: mcpHandler,
+		// Таймауты по образцу cmd/auth: краткие запросы (initialize,
+		// tools/list) укладываются легко; долгие задачи (exec) идут
+		// внутри одного POST и могут занять таймаут задачи — поэтому
+		// WriteTimeout щедрее задачного лимита.
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: time.Duration(mcpTaskTimeoutMs)*time.Millisecond + 15*time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+	go func() {
+		if err := mcpHTTP.Serve(mcpLis); err != nil {
+			fatalf(logger, "mcp serve failed", "err", err)
+		}
+	}()
+
+	logger.Info("akira-server listening", "addr", addr, "mcp_addr", mcpAddr, "max_connections", maxConns)
 	if err := grpcServer.Serve(lis); err != nil {
 		fatalf(logger, "serve failed", "err", err)
 	}

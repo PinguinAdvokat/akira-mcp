@@ -9,6 +9,17 @@ import (
 	"github.com/PinguinAdvokat/akira-mcp/internal/akira-server/connection/client"
 )
 
+// ClientInfo — паспорт активного подключения: идентификаторы
+// плюс hostname и platform из RegisterRequest (клиент сообщает их
+// при регистрации). ConnectionID имеет формат {user_id}:{client_id};
+// поле ClientID — часть после двоеточия.
+type ClientInfo struct {
+	ConnectionID string
+	ClientID     string
+	Hostname     string
+	Platform     string
+}
+
 // ConnectionPool хранит активные подключения по connection_id
 // ({user_id}:{client_id}) и реестр задач, ожидающих результат, по task_id.
 // Через SendTask любые объекты сервера могут отправлять задачи на
@@ -23,6 +34,7 @@ import (
 type ConnectionPool struct {
 	mu             sync.RWMutex
 	conns          map[string]*client.ClientConnection
+	infos          map[string]ClientInfo
 	pending        map[string]*pendingEntry
 	maxConnections int // лимит одновременных подключений на пользователя; 0 = без лимита
 }
@@ -32,16 +44,18 @@ type ConnectionPool struct {
 func New(maxConnections int) *ConnectionPool {
 	return &ConnectionPool{
 		conns:          make(map[string]*client.ClientConnection),
+		infos:          make(map[string]ClientInfo),
 		pending:        make(map[string]*pendingEntry),
 		maxConnections: maxConnections,
 	}
 }
 
 // Register добавляет новое подключение в пул под connection_id
-// ({user_id}:{client_id}). Возвращает ErrAlreadyRegistered, если
-// подключение с таким connection_id уже активно, и ErrTooManyConnections,
-// если пользователь превысил лимит одновременных подключений.
-func (p *ConnectionPool) Register(connectionID, userID string) (*client.ClientConnection, error) {
+// ({user_id}:{client_id}) и запоминает его метаданные info.
+// Возвращает ErrAlreadyRegistered, если подключение с таким
+// connection_id уже активно, и ErrTooManyConnections, если пользователь
+// превысил лимит одновременных подключений.
+func (p *ConnectionPool) Register(connectionID, userID string, info ClientInfo) (*client.ClientConnection, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, ok := p.conns[connectionID]; ok {
@@ -52,6 +66,9 @@ func (p *ConnectionPool) Register(connectionID, userID string) (*client.ClientCo
 	}
 	c := client.New(connectionID)
 	p.conns[connectionID] = c
+	info.ConnectionID = connectionID
+	info.ClientID = strings.TrimPrefix(connectionID, userID+":")
+	p.infos[connectionID] = info
 	return c, nil
 }
 
@@ -88,6 +105,7 @@ func (p *ConnectionPool) Unregister(conn *client.ClientConnection) {
 		return
 	}
 	delete(p.conns, conn.ClientID)
+	delete(p.infos, conn.ClientID)
 	p.mu.Unlock()
 	conn.Close()
 	p.failPendingClient(conn.ClientID)
@@ -104,6 +122,7 @@ func (p *ConnectionPool) Disconnect(connectionID string) bool {
 	c, ok := p.conns[connectionID]
 	if ok {
 		delete(p.conns, connectionID)
+		delete(p.infos, connectionID)
 	}
 	p.mu.Unlock()
 	if !ok {
@@ -133,4 +152,21 @@ func (p *ConnectionPool) Has(connectionID string) bool {
 	defer p.mu.RUnlock()
 	_, ok := p.conns[connectionID]
 	return ok
+}
+
+// ClientsByUser возвращает метаданные активных подключений пользователя
+// (фильтр по префиксу {user_id}:). Список отсортирован по connection_id —
+// вывод стабилен между вызовами.
+func (p *ConnectionPool) ClientsByUser(userID string) []ClientInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	prefix := userID + ":"
+	infos := make([]ClientInfo, 0, len(p.infos))
+	for id, info := range p.infos {
+		if strings.HasPrefix(id, prefix) {
+			infos = append(infos, info)
+		}
+	}
+	sort.Slice(infos, func(i, j int) bool { return infos[i].ConnectionID < infos[j].ConnectionID })
+	return infos
 }

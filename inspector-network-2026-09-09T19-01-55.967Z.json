@@ -1,0 +1,81 @@
+[
+  {
+    "id": "1788978070442-z6pipqiok",
+    "timestamp": "2026-09-09T18:21:10.442Z",
+    "method": "POST",
+    "url": "http://localhost:7000/mcp",
+    "requestHeaders": {
+      "accept": "application/json, text/event-stream",
+      "content-type": "application/json"
+    },
+    "requestBody": "{\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{\"sampling\":{},\"elicitation\":{\"form\":{},\"url\":{}},\"roots\":{\"listChanged\":true},\"tasks\":{\"list\":{},\"cancel\":{},\"requests\":{\"sampling\":{\"createMessage\":{}},\"elicitation\":{\"create\":{}}}},\"extensions\":{\"io.modelcontextprotocol/tasks\":{},\"io.modelcontextprotocol/ui\":{\"mimeTypes\":[\"text/html;profile=mcp-app\"],\"elicitation\":{}}}},\"clientInfo\":{\"name\":\"mcp-inspector\",\"version\":\"0.0.0\"}},\"jsonrpc\":\"2.0\",\"id\":0}",
+    "error": "MCP auth challenge (401)",
+    "duration": 261,
+    "category": "transport"
+  },
+  {
+    "id": "1788978070723-eh5u8kaue",
+    "timestamp": "2026-09-09T18:21:10.723Z",
+    "method": "GET",
+    "url": "http://localhost:7000/.well-known/oauth-authorization-server",
+    "requestHeaders": {
+      "accept": "application/json",
+      "mcp-protocol-version": "2025-11-25"
+    },
+    "responseStatus": 404,
+    "responseStatusText": "Not Found",
+    "responseHeaders": {
+      "content-length": "19",
+      "content-type": "text/plain; charset=utf-8",
+      "date": "Wed, 09 Sep 2026 18:21:10 GMT",
+      "x-content-type-options": "nosniff"
+    },
+    "responseBody": "404 page not found\n",
+    "duration": 14,
+    "category": "auth"
+  },
+  {
+    "id": "1788978070768-8g8on7cld",
+    "timestamp": "2026-09-09T18:21:10.768Z",
+    "method": "GET",
+    "url": "http://localhost:7000/.well-known/openid-configuration",
+    "requestHeaders": {
+      "accept": "application/json",
+      "mcp-protocol-version": "2025-11-25"
+    },
+    "responseStatus": 404,
+    "responseStatusText": "Not Found",
+    "responseHeaders": {
+      "content-length": "19",
+      "content-type": "text/plain; charset=utf-8",
+      "date": "Wed, 09 Sep 2026 18:21:10 GMT",
+      "x-content-type-options": "nosniff"
+    },
+    "responseBody": "404 page not found\n",
+    "duration": 7,
+    "category": "auth"
+  },
+  {
+    "id": "1788978070806-3wpsy4e0w",
+    "timestamp": "2026-09-09T18:21:10.806Z",
+    "method": "GET",
+    "url": "http://127.0.0.1:7000/.well-known/oauth-protected-resource/mcp",
+    "requestHeaders": {
+      "mcp-protocol-version": "2025-11-25"
+    },
+    "responseStatus": 200,
+    "responseStatusText": "OK",
+    "responseHeaders": {
+      "access-control-allow-headers": "Content-Type, Authorization",
+      "access-control-allow-methods": "GET, HEAD, OPTIONS",
+      "access-control-allow-origin": "*",
+      "cache-control": "no-store",
+      "content-length": "128",
+      "content-type": "application/json",
+      "date": "Wed, 09 Sep 2026 18:21:10 GMT"
+    },
+    "responseBody": "{\"resource\":\"http://127.0.0.1:7000/mcp\",\"authorization_servers\":[\"http://127.0.0.1:6000\"],\"bearer_methods_supported\":[\"header\"]}",
+    "duration": 7,
+    "category": "auth"
+  }
+]

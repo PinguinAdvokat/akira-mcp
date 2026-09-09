@@ -1,13 +1,19 @@
 // Пакет authhttp — HTTP-слой auth-сервиса: регистрация с подтверждением
 // email коротким кодом из письма (код вводится вместе с email —
 // верификация сразу выдаёт пару токенов, без отдельного логина),
-// выдача пар токенов (password / refresh_token grants), ротация
-// и отзыв refresh-токенов, данные аккаунта и перегенерация
-// connect_key, публикация JWKS. JSON в формате, близком к OAuth2.
+// выдача пар токенов (password / refresh_token / authorization_code
+// grants; authorization_code — с PKCE S256, тело /token принимается
+// и как JSON, и как form-encoded), ротация и отзыв refresh-токенов,
+// данные аккаунта и перегенерация connect_key, публикация JWKS,
+// а также OAuth-часть для MCP-клиентов: метаданные авторизационного
+// сервера (RFC 8414), dynamic client registration (RFC 7591),
+// /authorize (редирект на фронтенд-приложение — оно отдельный проект)
+// и /authorize/confirm (подтверждение логина, выдача кода).
 //
 // Файлы пакета: httpapi.go — маршруты и общие хелперы; token.go —
 // выдача, ротация и отзыв токенов; register.go — регистрация
-// и верификация email; account.go — маршруты под Bearer-токеном.
+// и верификация email; account.go — маршруты под Bearer-токеном;
+// oauth.go — authorization code flow с PKCE.
 //
 // TLS-терминация и ограничение частоты запросов — на обратном
 // прокси (nginx) перед сервисом; сам сервис слушает открытый HTTP.
@@ -49,6 +55,18 @@ type Config struct {
 	Mail authmail.Sender
 	// EmailTTL — срок жизни кода подтверждения email.
 	EmailTTL time.Duration
+	// PublicURL — публичный базовый URL сервиса (например,
+	// https://auth.example.com). Из него строятся абсолютные URL
+	// в метаданных авторизационного сервера (RFC 8414) и в редиректах
+	// /authorize. Пустой — OAuth-эндпоинты не работают (ошибка 500).
+	PublicURL string
+	// FrontendURL — базовый URL фронтенд-приложения (форма логина;
+	// отдельный проект). /authorize редиректит на него, передавая
+	// OAuth-параметры в query. Пустой — /authorize отвечает JSON-ошибкой
+	// (ручная проверка флоу — POST /authorize/confirm напрямую).
+	FrontendURL string
+	// CodeTTL — срок жизни кода авторизации (default 10m, см. New).
+	CodeTTL time.Duration
 }
 
 // handler — состояние HTTP-слоя auth-сервиса.
@@ -61,6 +79,9 @@ type handler struct {
 
 // New собирает http.Handler auth-сервиса.
 func New(tokens *authtoken.Manager, store authstore.Store, cfg Config) http.Handler {
+	if cfg.CodeTTL <= 0 {
+		cfg.CodeTTL = 10 * time.Minute
+	}
 	h := &handler{
 		tokens: tokens,
 		store:  store,
@@ -78,6 +99,10 @@ func New(tokens *authtoken.Manager, store authstore.Store, cfg Config) http.Hand
 	mux.HandleFunc("POST /connect-key/regenerate", h.handleRegenerateConnectKey)
 	mux.HandleFunc("GET /jwks.json", h.handleJWKS)
 	mux.HandleFunc("GET /.well-known/jwks.json", h.handleJWKS)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", h.handleAuthServerMetadata)
+	mux.HandleFunc("POST /oauth/register", h.handleOAuthRegister)
+	mux.HandleFunc("GET /authorize", h.handleAuthorize)
+	mux.HandleFunc("POST /authorize/confirm", h.handleAuthorizeConfirm)
 	mux.HandleFunc("GET /healthz", h.handleHealthz)
 	return mux
 }

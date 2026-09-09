@@ -4,7 +4,8 @@
 //
 // Файлы пакета симметричны postgres-стору: memory.go — хранилище
 // и конструктор; users.go — пользователи; refresh.go — refresh-токены;
-// verification.go — коды подтверждения email.
+// verification.go — коды подтверждения email; oauth.go — OAuth-клиенты
+// и коды авторизации.
 package authstorememory
 
 import (
@@ -36,6 +37,8 @@ type Store struct {
 	byKey   map[string]string                      // connect_key → user ID
 	refr    map[string]authstore.RefreshToken      // tokenHash → RefreshToken
 	verifs  map[string]authstore.EmailVerification // userID → активный код
+	clients map[string]authstore.OAuthClient       // clientID → OAuthClient
+	codes   map[string]authstore.OAuthCode         // codeHash → OAuthCode
 }
 
 // New создаёт пустое хранилище.
@@ -47,5 +50,7 @@ func New() *Store {
 		byKey:   make(map[string]string),
 		refr:    make(map[string]authstore.RefreshToken),
 		verifs:  make(map[string]authstore.EmailVerification),
+		clients: make(map[string]authstore.OAuthClient),
+		codes:   make(map[string]authstore.OAuthCode),
 	}
 }

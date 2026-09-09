@@ -65,6 +65,15 @@ func envDuration(logger *slog.Logger, name string, fallback time.Duration) time.
 	return d
 }
 
+// envOr читает переменную окружения; пустое или отсутствующее
+// значение — fallback.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
 // bootstrapUser создаёт стартового пользователя из AUTH_BOOTSTRAP_*
 // (пароль хешируется bcrypt), сразу с подтверждённым email и выданным
 // connect_key. Если имя или email заняты — это либо наш пользователь
@@ -171,6 +180,13 @@ func main() {
 	accessTTL := envDuration(logger, "AUTH_ACCESS_TTL", 15*time.Minute)
 	refreshTTL := envDuration(logger, "AUTH_REFRESH_TTL", 720*time.Hour)
 	emailTTL := envDuration(logger, "AUTH_EMAIL_TTL", 15*time.Minute)
+	// Публичный URL — база абсолютных ссылок OAuth-метаданных;
+	// фронтенд — куда /authorize редиректит на форму логина
+	// (пустой → /authorize отвечает ошибкой; флоу можно гнать
+	// через POST /authorize/confirm напрямую).
+	publicURL := envOr("AUTH_PUBLIC_URL", "http://127.0.0.1:6000")
+	frontendURL := os.Getenv("AUTH_FRONTEND_URL")
+	codeTTL := envDuration(logger, "AUTH_CODE_TTL", 10*time.Minute)
 
 	// Ключи генерируются на старте и живут в памяти: после рестарта
 	// kid меняется и все старые токены невалидны (см. пакет authtoken).
@@ -199,8 +215,11 @@ func main() {
 	srv := &http.Server{
 		Addr: addr,
 		Handler: authhttp.New(tokens, store, authhttp.Config{
-			Mail:     mail,
-			EmailTTL: emailTTL,
+			Mail:        mail,
+			EmailTTL:    emailTTL,
+			PublicURL:   publicURL,
+			FrontendURL: frontendURL,
+			CodeTTL:     codeTTL,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,

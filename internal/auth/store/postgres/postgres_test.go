@@ -422,7 +422,7 @@ func TestCompleteClashKeepsCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser iris: %v", err)
 	}
-	if err := s.SaveEmailVerification(ctx, authstore.EmailVerification{CodeHash: "vh-"+sfx, UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour), CreatedAt: time.Now()}); err != nil {
+	if err := s.SaveEmailVerification(ctx, authstore.EmailVerification{CodeHash: "vh-" + sfx, UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour), CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("SaveEmailVerification: %v", err)
 	}
 

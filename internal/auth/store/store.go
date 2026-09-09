@@ -1,5 +1,6 @@
 // Пакет authstore — обобщённый интерфейс хранилища auth-сервиса:
-// пользователи, refresh-токены и коды подтверждения email.
+// пользователи, refresh-токены, коды подтверждения email и OAuth-сущности
+// (клиенты dynamic registration и одноразовые коды авторизации).
 // Реализации: internal/auth/store/memory (тесты и разработка) и
 // internal/auth/store/postgres (продакшн). Хранилище общее для auth
 // и akira-server: сервер ищет пользователя по connect_key при
@@ -29,8 +30,9 @@ var (
 // (защита от перебора: 6 цифр, 5 попыток). После исчерпания нужен resend.
 const MaxVerificationAttempts = 5
 
-// ConnectKeyLen — длина connect_key: 22 символа из 31-буквенного
-// алфавита — это ~109 бит энтропии, перебор ключа по сети невозможен.
+// ConnectKeyLen — длина connect_key: 10 символов из 31-буквенного
+// алфавита — это ~50 бит энтропии; онлайн-перебор по сети невозможен
+// за лимитами частоты обратного прокси (см. CLAUDE.md).
 const ConnectKeyLen = 10
 
 // connectKeyAlphabet — символы без визуально похожих пар (0/O, 1/l/I
@@ -159,9 +161,10 @@ type EmailVerificationStore interface {
 }
 
 // Store — полное хранилище auth-сервиса: одна реализация закрывает
-// все три интерфейса.
+// все четыре интерфейса.
 type Store interface {
 	UserStore
 	RefreshStore
 	EmailVerificationStore
+	OAuthStore
 }

@@ -116,9 +116,9 @@ func (h *handler) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Коллизии connect_key практически невозможны (109 бит энтропии),
-	// но при ErrConnectKeyExists код не потребляется — просто повторяем
-	// с другим ключом.
+	// Коллизии connect_key маловероятны (~50 бит энтропии) и
+	// обрабатываются повторной генерацией — при ErrConnectKeyExists
+	// код не потребляется.
 	key, err := authstore.GenerateConnectKey()
 	if err != nil {
 		h.logger.Error("generate connect key", "err", err)

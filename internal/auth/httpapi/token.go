@@ -2,21 +2,30 @@ package authhttp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 
 	authstore "github.com/PinguinAdvokat/akira-mcp/internal/auth/store"
 )
 
-// tokenRequest — тело POST /token.
+// tokenRequest — тело POST /token: JSON (password/refresh_token
+// grants, наш API) или form-encoded (authorization_code grant —
+// так OAuth-клиенты по RFC 6749 §4.1.3, включая mcp-go).
 type tokenRequest struct {
 	GrantType    string `json:"grant_type"`
 	Username     string `json:"username"`
 	Password     string `json:"password"`
 	RefreshToken string `json:"refresh_token"`
+
+	// Поля authorization_code grant.
+	Code         string `json:"code"`
+	ClientID     string `json:"client_id"`
+	RedirectURI  string `json:"redirect_uri"`
+	CodeVerifier string `json:"code_verifier"`
 }
 
 // tokenResponse — успешный ответ POST /token.
@@ -28,8 +37,8 @@ type tokenResponse struct {
 }
 
 func (h *handler) handleToken(w http.ResponseWriter, r *http.Request) {
-	var req tokenRequest
-	if !decodeJSON(w, r, &req) {
+	req, ok := parseTokenRequest(w, r)
+	if !ok {
 		return
 	}
 
@@ -38,43 +47,114 @@ func (h *handler) handleToken(w http.ResponseWriter, r *http.Request) {
 		h.grantPassword(w, r.Context(), req)
 	case "refresh_token":
 		h.grantRefresh(w, r.Context(), req)
+	case "authorization_code":
+		h.grantAuthorizationCode(w, r.Context(), req)
 	default:
-		writeError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be password or refresh_token")
+		writeError(w, http.StatusBadRequest, "unsupported_grant_type",
+			"grant_type must be authorization_code, password or refresh_token")
 	}
 }
 
+// parseTokenRequest разбирает тело POST /token — form-encoded
+// (OAuth-клиенты, RFC 6749) или JSON (наш собственный API). Лимит
+// тела тот же, что у JSON-эндпоинтов (maxBodyBytes). Одинаковый
+// параметр в обоих форматах — одно значение (form приоритетнее).
+func parseTokenRequest(w http.ResponseWriter, r *http.Request) (tokenRequest, bool) {
+	ct, _, _ := strings.Cut(r.Header.Get("Content-Type"), ";")
+	if strings.EqualFold(strings.TrimSpace(ct), "application/x-www-form-urlencoded") {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		if err := r.ParseForm(); err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				writeError(w, http.StatusRequestEntityTooLarge, "invalid_request", "request body too large")
+				return tokenRequest{}, false
+			}
+			writeError(w, http.StatusBadRequest, "invalid_request", "malformed form body")
+			return tokenRequest{}, false
+		}
+		return tokenRequest{
+			GrantType:    r.PostFormValue("grant_type"),
+			Username:     r.PostFormValue("username"),
+			Password:     r.PostFormValue("password"),
+			RefreshToken: r.PostFormValue("refresh_token"),
+			Code:         r.PostFormValue("code"),
+			ClientID:     r.PostFormValue("client_id"),
+			RedirectURI:  r.PostFormValue("redirect_uri"),
+			CodeVerifier: r.PostFormValue("code_verifier"),
+			// resource (RFC 8707) шлют mcp-go-клиенты — принят и
+			// игнорируется: ресурс один, аудит не ведём.
+		}, true
+	}
+
+	var req tokenRequest
+	if !decodeJSON(w, r, &req) {
+		return tokenRequest{}, false
+	}
+	return req, true
+}
+
 // grantPassword проверяет учётные данные и выдаёт новую пару токенов.
-// Неподтверждённый email и неизвестное имя — тот же ответ и то же время
-// работы, что и при неверном пароле (анти-энумерация): bcrypt-сравнение
-// выполняется всегда, и до него проверяется пароль, а не верификация.
+// Проверка — общий с /authorize/confirm хелпер checkCredentials
+// (анти-энумерация: одинаковый ответ и одинаковое время на неверное
+// имя, неверный пароль и неподтверждённый email).
 func (h *handler) grantPassword(w http.ResponseWriter, ctx context.Context, req tokenRequest) {
 	if req.Username == "" || req.Password == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "username and password are required")
 		return
 	}
 
-	user, err := h.store.GetUserByUsername(ctx, req.Username)
-	if err != nil {
-		if !errors.Is(err, authstore.ErrUserNotFound) {
-			// Сбой стора — не «неверные учётные данные»: наружу 500.
-			h.logger.Error("password grant: lookup user", "err", err)
-			writeError(w, http.StatusInternalServerError, "server_error", "token issuance failed")
-			return
-		}
-		// Неизвестное имя: то же bcrypt-сравнение, чтобы время ответа
-		// не выдавало существование учётной записи.
-		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(req.Password))
-		h.logger.Warn("password grant failed", "username", req.Username)
-		writeError(w, http.StatusUnauthorized, "invalid_grant", "invalid credentials")
+	user, ok := h.checkCredentials(w, ctx, req.Username, req.Password)
+	if !ok {
 		return
 	}
-	if bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(req.Password)) != nil || !user.EmailVerified {
-		h.logger.Warn("password grant failed", "username", req.Username, "verified", user.EmailVerified)
-		writeError(w, http.StatusUnauthorized, "invalid_grant", "invalid credentials")
+	h.issuePair(w, ctx, user.ID, user.Username)
+}
+
+// grantAuthorizationCode обменивает одноразовый код на пару токенов.
+// Проверки: код существует и не истёк (ConsumeOAuthCode атомарен —
+// повторное использование кода и конкурентный обмен побеждает ровно
+// один вызов), client_id и redirect_uri совпадают с записью кода
+// (иначе код, выданный для одного клиента, можно обменять другим),
+// PKCE S256: base64url(sha256(code_verifier)) == code_challenge.
+// Несовпадение — invalid_grant (единый ответ, деталей наружу нет).
+func (h *handler) grantAuthorizationCode(w http.ResponseWriter, ctx context.Context, req tokenRequest) {
+	if req.Code == "" || req.ClientID == "" || req.RedirectURI == "" || req.CodeVerifier == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			"code, client_id, redirect_uri and code_verifier are required")
 		return
 	}
 
-	h.issuePair(w, ctx, user.ID, user.Username)
+	code, err := h.store.ConsumeOAuthCode(ctx, hashToken(req.Code))
+	if err != nil {
+		if errors.Is(err, authstore.ErrOAuthCodeNotFound) {
+			h.logger.Warn("authorization code grant failed",
+				"reason", "unknown, expired or already used code")
+			writeError(w, http.StatusUnauthorized, "invalid_grant",
+				"unknown, expired or already used authorization code")
+			return
+		}
+		h.logger.Error("consume oauth code", "err", err)
+		writeError(w, http.StatusInternalServerError, "server_error", "token issuance failed")
+		return
+	}
+
+	if code.ClientID != req.ClientID || code.RedirectURI != req.RedirectURI {
+		h.logger.Warn("authorization code grant failed", "reason", "client or redirect mismatch")
+		writeError(w, http.StatusUnauthorized, "invalid_grant", "invalid authorization code")
+		return
+	}
+	// PKCE S256 (plain запрещён ещё на /authorize). Верификатор
+	// обязателен: без него публичический клиент беззащитен перед
+	// перехватом кода.
+	sum := sha256.Sum256([]byte(req.CodeVerifier))
+	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
+	if challenge != code.CodeChallenge {
+		h.logger.Warn("authorization code grant failed", "reason", "pkce verification failed")
+		writeError(w, http.StatusUnauthorized, "invalid_grant", "invalid authorization code")
+		return
+	}
+
+	h.issuePair(w, ctx, code.UserID, "")
 }
 
 // grantRefresh заменяет refresh-токен новым (одноразовость: ротация)

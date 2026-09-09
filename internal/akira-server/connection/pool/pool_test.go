@@ -23,7 +23,7 @@ func execTask(id string) *pb.Task {
 // ErrConnectionClosed, а не ждёт результата вечно.
 func TestSendTaskFailsWhenTaskNeverSent(t *testing.T) {
 	pool := New(0) // без лимита подключений
-	conn, err := pool.Register("u1:c1", "u1")
+	conn, err := pool.Register("u1:c1", "u1", ClientInfo{})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestSendTaskFailsWhenTaskNeverSent(t *testing.T) {
 // возвращает ErrConnectionClosed, а не ждёт результата вечно.
 func TestSendTaskFailsWhenTaskSent(t *testing.T) {
 	pool := New(0) // без лимита подключений
-	conn, err := pool.Register("u1:c1", "u1")
+	conn, err := pool.Register("u1:c1", "u1", ClientInfo{})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestSendTaskFailsWhenTaskSent(t *testing.T) {
 // и не затирает ожидание первой.
 func TestSendTaskDuplicateID(t *testing.T) {
 	pool := New(0) // без лимита подключений
-	conn, err := pool.Register("u1:c1", "u1")
+	conn, err := pool.Register("u1:c1", "u1", ClientInfo{})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestSendTaskDuplicateID(t *testing.T) {
 // STATUS_TIMEOUT, а не ошибка.
 func TestSendTaskTaskTimeout(t *testing.T) {
 	pool := New(0) // без лимита подключений
-	conn, err := pool.Register("u1:c1", "u1")
+	conn, err := pool.Register("u1:c1", "u1", ClientInfo{})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestSendTaskTaskTimeout(t *testing.T) {
 // задачи и при nil error неотличим от настоящего результата).
 func TestSendTaskCallerDeadline(t *testing.T) {
 	pool := New(0) // без лимита подключений
-	conn, err := pool.Register("u1:c1", "u1")
+	conn, err := pool.Register("u1:c1", "u1", ClientInfo{})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestSendTaskCallerDeadline(t *testing.T) {
 // и завершается его собственным результатом.
 func TestHandleResultRejectsNonOwner(t *testing.T) {
 	pool := New(0) // без лимита подключений
-	conn, err := pool.Register("u1:c1", "u1")
+	conn, err := pool.Register("u1:c1", "u1", ClientInfo{})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestHandleResultRejectsNonOwner(t *testing.T) {
 // ожидание продолжает жить и завершается настоящим владельцем.
 func TestHandleResultRejectsEmptyOwner(t *testing.T) {
 	pool := New(0) // без лимита подключений
-	conn, err := pool.Register("u1:c1", "u1")
+	conn, err := pool.Register("u1:c1", "u1", ClientInfo{})
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -246,18 +246,18 @@ func TestHandleResultRejectsEmptyOwner(t *testing.T) {
 func TestMaxConnectionsPerUser(t *testing.T) {
 	pool := New(2)
 
-	if _, err := pool.Register("u1:a", "u1"); err != nil {
+	if _, err := pool.Register("u1:a", "u1", ClientInfo{}); err != nil {
 		t.Fatalf("register u1:a: %v", err)
 	}
-	if _, err := pool.Register("u1:b", "u1"); err != nil {
+	if _, err := pool.Register("u1:b", "u1", ClientInfo{}); err != nil {
 		t.Fatalf("register u1:b: %v", err)
 	}
 	// Лимит пользователя исчерпан.
-	if _, err := pool.Register("u1:c", "u1"); !errors.Is(err, connection.ErrTooManyConnections) {
+	if _, err := pool.Register("u1:c", "u1", ClientInfo{}); !errors.Is(err, connection.ErrTooManyConnections) {
 		t.Fatalf("register u1:c error = %v, want ErrTooManyConnections", err)
 	}
 	// Другой пользователь под лимит первого не попадает.
-	if _, err := pool.Register("u2:a", "u2"); err != nil {
+	if _, err := pool.Register("u2:a", "u2", ClientInfo{}); err != nil {
 		t.Fatalf("register u2:a: %v", err)
 	}
 
@@ -265,7 +265,7 @@ func TestMaxConnectionsPerUser(t *testing.T) {
 	if !pool.Disconnect("u1:a") {
 		t.Fatal("Disconnect u1:a returned false")
 	}
-	if _, err := pool.Register("u1:c", "u1"); err != nil {
+	if _, err := pool.Register("u1:c", "u1", ClientInfo{}); err != nil {
 		t.Fatalf("register u1:c after disconnect: %v", err)
 	}
 }
