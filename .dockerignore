@@ -1,0 +1,23 @@
+# Секреты и локальное окружение — в образ не попадают.
+.env
+.env.*
+
+# Git и служебные каталоги.
+.git
+.gitignore
+.claude
+CLAUDE.md
+
+# Прото-исходники: сгенерированный Go-код лежит в pkg/, сборке api/ не нужен.
+api/
+
+# Инструменты локальной разработки — в образ не нужны.
+Makefile
+shell.nix
+docs/
+inspector-network-*.json
+docker-compose.yaml
+
+# Docker-файлы в свой контекст не копируем.
+Dockerfile
+.dockerignore
