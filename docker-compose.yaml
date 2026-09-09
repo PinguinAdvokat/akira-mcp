@@ -26,12 +26,15 @@ services:
     container_name: akira-auth
     # Конфигурация — из .env (как при локальном запуске), но адреса
     # внутри compose-сети отличаются от 127.0.0.1 в .env — их
-    # переопределяем явно. AUTH_PUBLIC_URL строится от публичного
-    # адреса через nginx (порт 80), а не от дефолтного 127.0.0.1:6000.
+    # переопределяем явно. Публичный адрес (PUBLIC_URL из .env,
+    # по умолчанию http://localhost) — это внешний URL всего стека
+    # через nginx; на сервере задаётся реальным доменом, например
+    # https://akira.otsa.city, и от него строятся абсолютные ссылки
+    # в метаданных OAuth (RFC 8414).
     env_file: .env
     environment:
       DATABASE_URL: postgres://akira:akira@postgres:5432/akira
-      AUTH_PUBLIC_URL: http://localhost
+      AUTH_PUBLIC_URL: ${PUBLIC_URL:-http://localhost}
     # Наружу auth не смотрит — только через nginx.
     depends_on:
       postgres:
@@ -52,9 +55,10 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgres://akira:akira@postgres:5432/akira
-      # Публичные URL: внешние MCP-клиенты ходят через nginx (порт 80).
-      MCP_PUBLIC_URL: http://localhost
-      MCP_AUTH_SERVER_URL: http://localhost
+      # Публичные URL: внешние MCP-клиенты ходят через nginx — тот же
+      # PUBLIC_URL (на сервере — https-домен за TLS-прокси).
+      MCP_PUBLIC_URL: ${PUBLIC_URL:-http://localhost}
+      MCP_AUTH_SERVER_URL: ${PUBLIC_URL:-http://localhost}
       # А JWKS акира-сервер забирает сам (server-side fetch) — напрямую
       # по внутренней сети, nginx не нужен.
       MCP_JWKS_URL: http://auth:6000/jwks.json
