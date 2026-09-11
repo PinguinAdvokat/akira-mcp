@@ -2,7 +2,14 @@ package connection
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -150,6 +157,128 @@ func waitUnregistered(t *testing.T, pool *connectionpool.ConnectionPool, connID 
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("connection was not dropped within 5s")
+}
+
+// selfSignedCert выпускает самоподписанный сертификат с SAN 127.0.0.1
+// для TLS-тестов (серверный код не трогаем: listener оборачивается
+// в tls.NewListener, grpc-go принимает уже установленные коннекты).
+func selfSignedCert(t *testing.T) tls.Certificate {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "127.0.0.1"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:     []string{"localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+// startTLSServer поднимает in-process gRPC-сервер, как startServer,
+// но listener обёрнут в TLS с самоподписанным сертификатом.
+func startTLSServer(t *testing.T) (*connectionpool.ConnectionPool, string, string) {
+	t.Helper()
+
+	store := authstorememory.New()
+	userID := seedTestUser(t, store)
+
+	pool := connectionpool.New(0) // без лимита подключений
+	grpcServer := connectionserver.NewGRPCServer(pool, memLookup{store: store})
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	tlsLis := tls.NewListener(lis, &tls.Config{
+		Certificates: []tls.Certificate{selfSignedCert(t)},
+		NextProtos:   []string{"h2"},
+	})
+	go func() { _ = grpcServer.Serve(tlsLis) }()
+	t.Cleanup(grpcServer.Stop)
+
+	return pool, tlsLis.Addr().String(), userID + ":" + testClientID
+}
+
+// TestTLSConnect: клиент с TLS-конфигурацией регистрируется через
+// TLS-листенер и исполняет задачи; конфигурация с nil TLS (все старые
+// тесты) по-прежнему ходит plaintext.
+func TestTLSConnect(t *testing.T) {
+	pool, addr, connID := startTLSServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = Run(ctx, Config{
+			ServerAddr: addr,
+			ClientID:   testClientID,
+			ConnectKey: testConnectKey,
+			// Самоподписанный серт без CA — проверку пропускаем,
+			// но сам TLS-handshake обязан пройти.
+			TLS: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // тест
+		})
+	}()
+	waitRegistered(t, pool, connID)
+
+	res, err := pool.SendTask(context.Background(), connID, &pb.Task{
+		Payload: &pb.Task_Exec{Exec: &pb.ExecTask{Cmd: "echo tls"}},
+	})
+	if err != nil {
+		t.Fatalf("send task: %v", err)
+	}
+	if res.Status != pb.TaskResult_STATUS_OK {
+		t.Fatalf("status = %v, want STATUS_OK (error: %s, stderr: %s)", res.Status, res.Error, res.Stderr)
+	}
+	if string(res.Stdout) != "tls\n" {
+		t.Fatalf("stdout = %q, want %q", res.Stdout, "tls\n")
+	}
+}
+
+// TestTLSVerificationFailureNotFatal: клиент с проверкой сертификата
+// (системные CA) против самоподписанного серта не регистрируется,
+// но и не выходит — ошибка handshake транзиентна, клиент продолжает
+// попытки.
+func TestTLSVerificationFailureNotFatal(t *testing.T) {
+	pool, addr, connID := startTLSServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runErr := make(chan error, 1)
+	go func() {
+		runErr <- Run(ctx, Config{
+			ServerAddr: addr,
+			ClientID:   testClientID,
+			ConnectKey: testConnectKey,
+			RetryDelay: 50 * time.Millisecond,
+			// Проверка по системным CA: самоподписанный серт
+			// не пройдёт её.
+			TLS: &tls.Config{},
+		})
+	}()
+
+	// Несколько попыток handshake провалились, клиент жив.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-runErr:
+			t.Fatalf("client must not exit on TLS handshake failure: %v", err)
+		default:
+		}
+		if pool.Has(connID) {
+			t.Fatal("client unexpectedly registered with an untrusted certificate")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // TestExecTask проверяет полный цикл: регистрация → задача → результат.

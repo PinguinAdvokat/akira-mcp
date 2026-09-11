@@ -14,7 +14,7 @@ go test ./internal/... -run TestName -v               # single test
 TEST_DATABASE_URL="postgres://akira:akira@127.0.0.1:5432/akira" go test ./internal/auth/store/postgres/...   # Postgres store integration tests (skipped without the var; 127.0.0.1, not localhost — localhost may resolve to ::1 first and stall the connect)
 go run ./cmd/akira-server                              # run server
 go run ./cmd/akira-repl                                # server + stdin REPL for manual testing
-go run ./cmd/akira-client -client-id <id> -connect-key <key> [-server host:port]   # run client executor
+go run ./cmd/akira-client -client-id <id> -connect-key <key> [-server host:port] [-tls [-tls-insecure | -tls-server-name <name>]]   # run client executor (TLS terminates at nginx; verification via system CAs, -tls-insecure for self-signed, -tls-server-name when connecting by IP)
 go run ./cmd/auth                                      # run auth service (registration + JWT + JWKS)
 docker compose up -d                                   # full stack: Postgres + auth + akira-server + nginx (images built from one Dockerfile via --target akira-server|auth; .env supplies config, DATABASE_URL/MCP_JWKS_URL/MCP_AUTH_SERVER_URL are overridden to the compose-internal hostnames)
 docker compose up -d postgres                          # local Postgres only (for go run ./cmd/... during development)
