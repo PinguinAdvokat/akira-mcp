@@ -7,13 +7,19 @@
 // данные аккаунта и перегенерация connect_key, публикация JWKS,
 // а также OAuth-часть для MCP-клиентов: метаданные авторизационного
 // сервера (RFC 8414), dynamic client registration (RFC 7591),
-// /authorize (редирект на фронтенд-приложение — оно отдельный проект)
-// и /authorize/confirm (подтверждение логина, выдача кода).
+// /authorize (редирект на форму логина — по умолчанию встроенный
+// фронтенд этого же сервиса, web/) и /authorize/confirm
+// (подтверждение логина, выдача кода).
 //
 // Файлы пакета: httpapi.go — маршруты и общие хелперы; token.go —
 // выдача, ротация и отзыв токенов; register.go — регистрация
 // и верификация email; account.go — маршруты под Bearer-токеном;
-// oauth.go — authorization code flow с PKCE.
+// oauth.go — authorization code flow с PKCE; web.go — раздача
+// встроенного фронтенда (SPA без сборки, go:embed: web/).
+//
+// Фронтенд — часть этого сервиса (web/): вход, регистрация,
+// подтверждение email, дашборд аккаунта с connect_key и форма
+// OAuth-авторизации для MCP-хостов, куда ведёт /authorize.
 //
 // TLS-терминация и ограничение частоты запросов — на обратном
 // прокси (nginx) перед сервисом; сам сервис слушает открытый HTTP.
@@ -57,13 +63,13 @@ type Config struct {
 	EmailTTL time.Duration
 	// PublicURL — публичный базовый URL сервиса (например,
 	// https://auth.example.com). Из него строятся абсолютные URL
-	// в метаданных авторизационного сервера (RFC 8414) и в редиректах
-	// /authorize. Пустой — OAuth-эндпоинты не работают (ошибка 500).
+	// в метаданных авторизационного сервера (RFC 8414). Пустой —
+	// OAuth-эндпоинты не работают (ошибка 500).
 	PublicURL string
-	// FrontendURL — базовый URL фронтенд-приложения (форма логина;
-	// отдельный проект). /authorize редиректит на него, передавая
-	// OAuth-параметры в query. Пустой — /authorize отвечает JSON-ошибкой
-	// (ручная проверка флоу — POST /authorize/confirm напрямую).
+	// FrontendURL — базовый URL фронтенд-приложения (форма логина).
+	// /authorize редиректит на него, передавая OAuth-параметры
+	// в query. Пустой (по умолчанию) — встроенный фронтенд этого
+	// же сервиса: /authorize ведёт на /, форма логина внутри SPA.
 	FrontendURL string
 	// CodeTTL — срок жизни кода авторизации (default 10m, см. New).
 	CodeTTL time.Duration
@@ -90,6 +96,10 @@ func New(tokens *authtoken.Manager, store authstore.Store, cfg Config) http.Hand
 	}
 
 	mux := http.NewServeMux()
+	// Фронтенд (web.go): раздаётся этим же сервисом из go:embed,
+	// /authorize по умолчанию ведёт на него (см. handleAuthorize).
+	mux.HandleFunc("GET /{$}", h.handleIndex)
+	mux.HandleFunc("GET /assets/", h.handleAsset)
 	mux.HandleFunc("POST /register", h.handleRegister)
 	mux.HandleFunc("POST /verify", h.handleVerify)
 	mux.HandleFunc("POST /verify/resend", h.handleResend)
