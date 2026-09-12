@@ -37,6 +37,10 @@ type Config struct {
 	// AuthServerURL — публичный базовый URL auth-сервиса
 	// (authorization_servers в protected resource metadata).
 	AuthServerURL string
+	// ClientReleasesURL — база релизов, откуда скрипт /sh качает
+	// бинарник akira-client (скрипт добавит /latest/download/…).
+	// Пустая — defaultClientReleasesURL.
+	ClientReleasesURL string
 	// Logger — логгер сервера (nil — slog.Default()).
 	Logger *slog.Logger
 }
@@ -58,10 +62,12 @@ func ctxUserID(ctx context.Context) string {
 // от пакета mcplib.
 type mcpServer = mcplib.MCPServer
 
-// New собирает HTTP-хендлер MCP-сервера: корневой mux с двумя путями —
-// /mcp (stateless StreamableHTTP, обёрнутый в проверку Bearer-токенов)
-// и /.well-known/oauth-protected-resource/mcp (метаданные защищённого
-// ресурса, RFC 9728 — публичический, без авторизации). Метаданные —
+// New собирает HTTP-хендлер MCP-сервера: корневой mux с тремя путями —
+// /mcp (stateless StreamableHTTP, обёрнутый в проверку Bearer-токенов),
+// /.well-known/oauth-protected-resource/mcp (метаданные защищённого
+// ресурса, RFC 9728 — публичический, без авторизации) и GET /sh
+// (установочный скрипт akira-client — публичический, адрес сервера
+// и TLS-флаги зашиты из PublicURL). Метаданные —
 // входная точка OAuth-флоу: без токена клиент получает 401 с resource_metadata,
 // по нему фетчит PRM и узнаёт адрес auth-сервера. Stateless-режим не требует
 // закрепления сессий за инстансом — можно за балансировщиком.
@@ -89,6 +95,26 @@ func New(cfg Config) (http.Handler, error) {
 		logger = slog.Default()
 	}
 	logger = logger.With(slog.String("component", "akiraMCP"))
+
+	// Установочный скрипт /sh: адрес сервера и TLS-флаги зашиваем
+	// из PublicURL, рендерим один раз при старте — хендлер просто
+	// отдаёт готовую строку.
+	connAddr, tlsFlags, err := clientConnectParams(cfg.PublicURL)
+	if err != nil {
+		return nil, fmt.Errorf("akiramcp: %w", err)
+	}
+	releasesURL := cfg.ClientReleasesURL
+	if releasesURL == "" {
+		releasesURL = defaultClientReleasesURL
+	}
+	installSh, err := renderInstallScript(installParams{
+		ReleasesURL: strings.TrimSuffix(releasesURL, "/"),
+		ServerAddr:  connAddr,
+		TLSFlags:    tlsFlags,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("akiramcp: render install script: %w", err)
+	}
 
 	s := mcplib.NewMCPServer("akira", Version,
 		mcplib.WithToolCapabilities(false),
@@ -123,6 +149,13 @@ func New(cfg Config) (http.Handler, error) {
 			AuthorizationServers:   []string{strings.TrimSuffix(cfg.AuthServerURL, "/")},
 			BearerMethodsSupported: []string{"header"},
 		}))
+	// Установочный скрипт akira-client (bash <(curl -sL …/sh) KEY):
+	// публичический, без авторизации — connect key скрипт спрашивает
+	// у пользователя, а не получает от сервера.
+	mux.HandleFunc("GET /sh", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+		_, _ = w.Write([]byte(installSh))
+	})
 	return mux, nil
 }
 

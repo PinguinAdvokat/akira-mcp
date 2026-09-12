@@ -1,0 +1,34 @@
+# Релиз akira-client: по тегу v* собираем статические бинарники
+# под 4 платформы (как в Dockerfile: CGO_ENABLED=0, -trimpath,
+# -ldflags="-s -w") и выкладываем ассетами akira-client-<os>-<arch>.
+# Скрипт установки GET /sh качает их через /releases/latest/download/.
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # создание релиза и загрузка ассетов
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: build
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -trimpath -ldflags="-s -w" \
+              -o "out/akira-client-${os}-${arch}" ./cmd/akira-client
+          done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/akira-client-*
+          fail_on_unmatched_files: true
