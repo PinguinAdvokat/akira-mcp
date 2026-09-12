@@ -9,6 +9,7 @@ package connection
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log"
@@ -18,6 +19,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
@@ -48,6 +50,10 @@ type Config struct {
 	// RetryDelay — пауза между попытками переподключения и между
 	// повторными попытками доставки результата (SubmitResult); 0 = 3с.
 	RetryDelay time.Duration
+	// TLS — конфигурация TLS-соединения (проверка сертификата сервера,
+	// SNI и т.д.); nil = без шифрования, как раньше. TLS терминируется
+	// прокси (nginx) — сам сервер слушает plaintext.
+	TLS *tls.Config
 }
 
 // Run подключается к серверу и поддерживает соединение, переподключаясь
@@ -66,8 +72,17 @@ func Run(ctx context.Context, cfg Config) error {
 		retry = defaultRetryDelay
 	}
 
+	// TLS-канал или plaintext: ошибки handshake приходят как обычные
+	// транзиентные ошибки канала — клиент переподключается по общим
+	// правилам (isFatalConnectError отсекает только Unauthenticated/
+	// PermissionDenied).
+	transportCreds := grpc.WithTransportCredentials(insecure.NewCredentials())
+	tlsEnabled := cfg.TLS != nil
+	if tlsEnabled {
+		transportCreds = grpc.WithTransportCredentials(credentials.NewTLS(cfg.TLS))
+	}
 	conn, err := grpc.NewClient(cfg.ServerAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		transportCreds,
 		// keepalive на канале: при «тихом» разрыве (пакеты исчезают,
 		// RST нет) Recv по потоку не падает сам по себе — пинг/понг
 		// закрывают канал примерно за Time+Timeout (~40с), и клиент
@@ -93,7 +108,7 @@ func Run(ctx context.Context, cfg Config) error {
 	var connID atomic.Pointer[string]
 	go submitLoop(ctx, client, ob, &connID, retry)
 
-	log.Printf("connecting to %s, client_id=%s", cfg.ServerAddr, cfg.ClientID)
+	log.Printf("connecting to %s, client_id=%s, tls=%v", cfg.ServerAddr, cfg.ClientID, tlsEnabled)
 	for {
 		err := runSession(ctx, client, cfg, ob, &connID)
 		if err != nil && ctx.Err() == nil {
