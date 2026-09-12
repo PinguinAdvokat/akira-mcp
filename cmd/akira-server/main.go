@@ -161,6 +161,8 @@ func main() {
 	mcpReadMaxBytes := envMs("MCP_READ_MAX_BYTES", 1<<20, logger)
 	mcpPublicURL := envOr("MCP_PUBLIC_URL", "http://127.0.0.1:7000")
 	mcpAuthServerURL := envOr("MCP_AUTH_SERVER_URL", "http://127.0.0.1:6000")
+	// Пустая — дефолт в пакете akiramcp (defaultClientReleasesURL).
+	mcpClientReleasesURL := envOr("MCP_CLIENT_RELEASES_URL", "")
 	validator, err := akiramcp.NewTokenValidator(context.Background(),
 		envOr("MCP_JWKS_URL", "http://127.0.0.1:6000/jwks.json"),
 		envOr("MCP_AUTH_ISSUER", "akira"),
@@ -175,7 +177,9 @@ func main() {
 		ReadMaxBytes:  mcpReadMaxBytes,
 		PublicURL:     mcpPublicURL,
 		AuthServerURL: mcpAuthServerURL,
-		Logger:        logger,
+		// Релизы для установочного скрипта /sh.
+		ClientReleasesURL: mcpClientReleasesURL,
+		Logger:            logger,
 	})
 	if err != nil {
 		fatalf(logger, "mcp server init failed", "err", err)

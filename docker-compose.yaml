@@ -56,7 +56,9 @@ services:
     environment:
       DATABASE_URL: postgres://akira:akira@postgres:5432/akira
       # Публичные URL: внешние MCP-клиенты ходят через nginx — тот же
-      # PUBLIC_URL (на сервере — https-домен за TLS-прокси).
+      # PUBLIC_URL (на сервере — https-домен за TLS-прокси). PUBLIC_URL
+      # также зашивается в установочный скрипт /sh: адрес -server
+      # и TLS-флаги akira-client выводятся из MCP_PUBLIC_URL.
       MCP_PUBLIC_URL: ${PUBLIC_URL:-http://localhost}
       MCP_AUTH_SERVER_URL: ${PUBLIC_URL:-http://localhost}
       # А JWKS акира-сервер забирает сам (server-side fetch) — напрямую

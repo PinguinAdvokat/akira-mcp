@@ -608,3 +608,19 @@ And the machine connection (connect_key from step 3):
 ```bash
 go run ./cmd/akira-client -client-id laptop -connect-key <connect_key>
 ```
+
+Or, on any Linux/macOS machine, the one-command install (served by akira-server at the public
+`GET /sh` endpoint — public, no auth):
+
+```bash
+bash <(curl -sL https://<PUBLIC_URL>/sh) <connect_key>
+```
+
+The generated script detects OS/arch, downloads the `akira-client` binary from GitHub Releases
+(latest, `akira-client-<os>-<arch>`) into `/tmp`, prompts for a `client_id` (empty input
+defaults to the hostname), and starts the binary in the background via `nohup` — logs go to
+`/tmp/akira-client.log`, the pid is written to `/tmp/akira-client.pid`. The server address and
+TLS flags are baked into the script by akira-server (derived from `MCP_PUBLIC_URL`). Note the
+connect key is visible in the running process's argv (`ps`), and `releases/latest/download/…`
+404s until the first `v*` tag has been pushed (`.github/workflows/release.yml` builds the
+release assets).
