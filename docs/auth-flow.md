@@ -26,7 +26,7 @@ PKCE flow that MCP clients drive, and the machine connection path — as impleme
 ```mermaid
 flowchart LR
     U(["User"])
-    FE["Frontend<br/>(login form — separate project)"]
+    FE["Frontend<br/>(login form — built into auth, GET /)"]
     HOST["MCP host<br/>(LLM client)"]
     CLI["akira-client<br/>(user's machine)"]
     AUTH["auth service<br/>HTTP :6000"]
@@ -301,11 +301,11 @@ Step by step:
    `state`, `code_challenge`, `code_challenge_method`. Validation: the client must exist;
    `redirect_uri` must **exactly** match one of the registered URIs (no open redirects);
    PKCE is mandatory — `code_challenge` 43–128 chars, method `S256` only (`plain` is
-   rejected). On success the request is **302-redirected to `AUTH_FRONTEND_URL`** with
-   the original query passed through — the login form is a separate project, auth serves
-   JSON only. With `AUTH_FRONTEND_URL` empty, `/authorize` answers a `503` JSON error
-   instead, and the flow can be driven manually via `/authorize/confirm` (see the
-   [appendix](#11-appendix-driving-the-flow-with-curl)).
+   rejected). On success the request is **302-redirected to the login form** with the
+   original query passed through. The form is the **built-in frontend served by auth
+   itself at `GET /`** (see [§4](#4-session-lifecycle-frontend-api)) when
+   `AUTH_FRONTEND_URL` is empty (the default); setting `AUTH_FRONTEND_URL` points the
+   redirect at an external frontend app instead.
 
 6. **`POST /authorize/confirm`** — what the frontend sends after the user submits the
    login form: `{username, password}` plus all the OAuth parameters it received, verbatim:
@@ -445,7 +445,7 @@ Read from the environment (`.env` is loaded via godotenv).
 | `AUTH_EMAIL_TTL` | `15m` | verification code lifetime (6 digits, 5 attempts) |
 | `AUTH_CODE_TTL` | `10m` | authorization code lifetime |
 | `AUTH_PUBLIC_URL` | `http://127.0.0.1:6000` | public base URL; absolute links in RFC 8414 metadata |
-| `AUTH_FRONTEND_URL` | *(empty)* | login-form base; `/authorize` 302s here. Empty → `/authorize` answers a JSON error; drive the flow via `/authorize/confirm` |
+| `AUTH_FRONTEND_URL` | *(empty)* | external login-form base for `/authorize` redirects; **empty (default) — the built-in frontend served by auth at `GET /`** (login, registration, email verification, account dashboard, OAuth consent form for MCP hosts) |
 | `AUTH_BOOTSTRAP_USERNAME` / `_PASSWORD` / `_EMAIL` | *(empty)* | startup user, created verified with a connect_key (password ≤ 72 bytes) |
 | `SMTP_HOST` | *(empty)* | empty → verification codes are logged, not emailed |
 | `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | `587` / … / … / `akira@localhost` | SMTP settings |
@@ -543,8 +543,9 @@ curl -s -X POST "$BASE/token" -H 'Content-Type: application/json' \
   -d "{\"grant_type\":\"refresh_token\",\"refresh_token\":\"$REFRESH\"}"
 ```
 
-The OAuth flow, driven manually (this is what an MCP host does automatically; with
-`AUTH_FRONTEND_URL` unset, step 8 replaces the browser round-trip):
+The OAuth flow, driven manually (this is what an MCP host does automatically; the
+browser round-trip through the frontend is collapsed into step 8 — the form itself
+just relays credentials + OAuth params to `/authorize/confirm`):
 
 ```bash
 # 6. PKCE pair: verifier 43..128 chars, challenge = base64url(sha256(verifier))
@@ -556,8 +557,8 @@ CLIENT_ID=$(curl -s -X POST "$BASE/oauth/register" -H 'Content-Type: application
   -d '{"client_name":"curl-test","redirect_uris":["http://127.0.0.1:9999/callback"],"token_endpoint_auth_method":"none"}' \
   | jget client_id)
 
-# 8. GET /authorize would 302 to the frontend; without AUTH_FRONTEND_URL it answers
-#    a 503 JSON error — expected. Do what the frontend does: confirm credentials
+# 8. GET /authorize 302s to the built-in login form (http://127.0.0.1:6000/)
+#    passing the query through. Do what that form does: confirm credentials
 #    with the same OAuth params.
 LOCATION=$(curl -s -X POST "$BASE/authorize/confirm" -H 'Content-Type: application/json' -d "{
   \"username\": \"alice\", \"password\": \"correct-horse\",

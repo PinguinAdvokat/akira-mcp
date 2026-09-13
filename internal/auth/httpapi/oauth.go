@@ -208,11 +208,12 @@ func (h *handler) validateAuthorize(w http.ResponseWriter, ctx context.Context, 
 	return &client
 }
 
-// handleAuthorize — точка входа authorization code flow. Формы логина
-// в auth-сервисе нет (фронтенд — отдельный проект): после валидации
-// запрос 302-редиректится на FrontendURL, передавая исходные
-// OAuth-параметры в query — их фронтенд отправит обратно
-// в POST /authorize/confirm.
+// handleAuthorize — точка входа authorization code flow. После
+// валидации запрос 302-редиректится на форму логина, передавая
+// исходные OAuth-параметры в query — их форма отправит обратно
+// в POST /authorize/confirm. По умолчанию форма — встроенный
+// фронтенд этого же сервиса ("/", web.go); AUTH_FRONTEND_URL
+// задаёт внешний фронтенд (например, при выносе SPA отдельно).
 func (h *handler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	params := authorizeParams{
@@ -228,11 +229,12 @@ func (h *handler) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Пустой FrontendURL — встроенный фронтенд: корень этого же
+	// сервиса, куда сматчен GET /{$} (web.go). Параметры проходят
+	// через query как есть, маршрут в SPA определяется по ним.
 	frontend := strings.TrimSuffix(h.cfg.FrontendURL, "/")
 	if frontend == "" {
-		writeError(w, http.StatusServiceUnavailable, "server_error",
-			"authorization UI is not configured (AUTH_FRONTEND_URL is empty)")
-		return
+		frontend = "/"
 	}
 	// Passthrough исходного query: параметры уже провалидированы,
 	// дополнительные (кроме стандартных) фронтенд прочитает из URL.
