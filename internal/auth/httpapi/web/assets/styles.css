@@ -1,25 +1,30 @@
-/* Akira — встроенный фронтенд auth-сервиса. Тёмная тема,
-   акцент — фиолетово-синий градиент логотипа. Без сборки:
+/* Akira — встроенный фронтенд auth-сервиса. Тёмная тема gruvbox,
+   акценты — плоские цвета, без градиентов. Без сборки:
    файл раздаётся как есть (httpapi/web/assets). */
 
 :root {
-  --bg: #0b0e14;
-  --bg-panel: #12161f;
-  --bg-elevated: #171c27;
-  --bg-input: #0e121a;
-  --border: #232a38;
-  --border-strong: #2e3749;
-  --text: #e8ecf3;
-  --text-dim: #98a2b3;
-  --text-faint: #6b7689;
-  --accent: #7c5cff;
-  --accent-2: #4cc2ff;
-  --accent-grad: linear-gradient(135deg, #7c5cff, #4cc2ff);
-  --danger: #ff6b7a;
-  --danger-dim: #3a1d24;
-  --ok: #4cd97b;
-  --ok-dim: #12331f;
-  --warn: #ffc861;
+  /* gruvbox dark */
+  --bg: #1d2021;            /* bg0_hard — фон страницы */
+  --bg-panel: #282828;      /* bg0 — карточки/панели */
+  --bg-elevated: #32302f;   /* elevated — hover, toast */
+  --bg-input: #1d2021;
+  --border: #3c3836;        /* bg1 */
+  --border-strong: #504945; /* bg2 */
+  --text: #ebdbb2;          /* fg */
+  --text-dim: #bdae93;      /* fg2 */
+  --text-faint: #7c6f64;    /* fg4 */
+  --accent: #fe8019;        /* orange */
+  --accent-2: #83a598;      /* blue */
+  --aqua: #8ec07c;
+  --danger: #fb4934;        /* red */
+  --danger-dim: #3c2219;
+  --danger-border: #7c2d21;
+  --ok: #b8bb26;            /* green */
+  --ok-dim: #2c3021;
+  --ok-border: #4d5326;
+  --ok-text: #d5d78a;
+  --warn: #fabd2f;          /* yellow */
+  --warn-dim: #383118;
   --radius: 10px;
   --radius-lg: 16px;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
@@ -40,10 +45,6 @@ body {
   font-family: var(--sans);
   font-size: 15px;
   line-height: 1.55;
-  /* Мягкое свечение сверху — глубина без шума. */
-  background-image:
-    radial-gradient(1200px 500px at 50% -200px, rgba(124, 92, 255, .14), transparent 70%);
-  background-repeat: no-repeat;
 }
 
 a { color: var(--accent-2); text-decoration: none; }
@@ -59,7 +60,7 @@ a:hover { text-decoration: underline; }
 
 .topbar {
   border-bottom: 1px solid var(--border);
-  background: rgba(11, 14, 20, .85);
+  background: rgba(29, 32, 33, .92);
   backdrop-filter: blur(8px);
   position: sticky;
   top: 0;
@@ -113,13 +114,13 @@ a:hover { text-decoration: underline; }
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: var(--accent-grad);
+  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
   font-size: 13px;
-  color: #fff;
+  color: #1d2021;
   flex-shrink: 0;
 }
 
@@ -173,7 +174,7 @@ h1 {
 }
 .field input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(124, 92, 255, .18);
+  box-shadow: 0 0 0 3px rgba(254, 128, 25, .22);
 }
 .field input.mono { font-family: var(--mono); letter-spacing: 2px; font-size: 16px; }
 
@@ -189,7 +190,7 @@ h1 {
   color: var(--danger);
 }
 
-input::placeholder { color: #4a5265; }
+input::placeholder { color: #665c54; }
 
 .btn {
   display: inline-flex;
@@ -204,8 +205,8 @@ input::placeholder { color: #4a5265; }
   font-family: inherit;
   cursor: pointer;
   transition: opacity .15s, transform .05s;
-  color: #fff;
-  background: var(--accent-grad);
+  color: #1d2021;
+  background: var(--accent);
 }
 .btn:hover { opacity: .9; }
 .btn:active { transform: translateY(1px); }
@@ -224,7 +225,7 @@ input::placeholder { color: #4a5265; }
 
 .btn-danger {
   background: transparent;
-  border: 1px solid #58242e;
+  border: 1px solid var(--danger-border);
   color: var(--danger);
 }
 .btn-danger:hover { background: var(--danger-dim); opacity: 1; }
@@ -269,8 +270,8 @@ input::placeholder { color: #4a5265; }
   margin-bottom: 16px;
   border: 1px solid transparent;
 }
-.alert-error { background: var(--danger-dim); border-color: #58242e; color: #ffb3bd; }
-.alert-ok { background: var(--ok-dim); border-color: #1d4a2e; color: #a9f0c0; }
+.alert-error { background: var(--danger-dim); border-color: var(--danger-border); color: #ffb3b3; }
+.alert-ok { background: var(--ok-dim); border-color: var(--ok-border); color: var(--ok-text); }
 
 #toasts {
   position: fixed;
@@ -314,14 +315,6 @@ input::placeholder { color: #4a5265; }
 }
 .page-head h2 { margin: 0; font-size: 19px; }
 
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-  align-items: start;
-}
-@media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
-
 .panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -344,7 +337,7 @@ input::placeholder { color: #4a5265; }
 
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 14px; }
 .kv dt { color: var(--text-dim); margin: 0; }
-.kv dd { margin: 0; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.kv dd { margin: 0; display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
 
 .key-value {
   font-family: var(--mono);
@@ -366,8 +359,8 @@ input::placeholder { color: #4a5265; }
   border-radius: 99px;
   padding: 2px 9px;
 }
-.badge-ok { background: var(--ok-dim); color: var(--ok); }
-.badge-warn { background: #33290f; color: var(--warn); }
+.badge-ok { background: var(--ok-dim); color: var(--ok-text); }
+.badge-warn { background: var(--warn-dim); color: var(--warn); }
 
 .icon-btn {
   background: none;
@@ -383,47 +376,92 @@ input::placeholder { color: #4a5265; }
 .muted { color: var(--text-dim); font-size: 13px; }
 .faint { color: var(--text-faint); font-size: 12.5px; }
 
-/* ── MCP-подключение ────────────────────────────────────── */
+/* ── команда подключения ────────────────────────────────── */
 
-.steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
-.steps > li {
-  counter-increment: step;
-  position: relative;
-  padding: 0 0 18px 40px;
-  border-left: 2px solid var(--border);
-  margin-left: 12px;
+.connect-command {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin: 10px 0 6px;
 }
-.steps > li:last-child { padding-bottom: 0; border-left-color: transparent; }
-.steps > li::before {
-  content: counter(step);
-  position: absolute;
-  left: -14px;
-  top: 0;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--accent-grad);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
+.connect-command .copy-line {
+  flex: 1;
   display: flex;
   align-items: center;
-  justify-content: center;
+  padding: 12px 14px;
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  font-size: 14px;
 }
-.steps > li.done::before { content: "✓"; background: var(--ok); }
+.connect-command .copy-line .key { color: var(--aqua); }
 
-.steps h4 { margin: 2px 0 6px; font-size: 14px; }
-.steps p { margin: 0 0 8px; font-size: 13.5px; color: var(--text-dim); }
+/* ── секции дашборда (описание, tools, resources) ───────── */
 
-code.inline, .copy-line {
+.section { margin-top: 26px; }
+.section-title {
+  font-size: 15.5px;
+  font-weight: 700;
+  margin: 0 0 6px;
+  color: var(--text);
+}
+.section-sub {
+  color: var(--text-dim);
+  font-size: 14px;
+  margin: 0 0 14px;
+  max-width: 640px;
+}
+
+.tool-list {
+  display: grid;
+  gap: 12px;
+}
+.tool-card,
+.resource-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+}
+.tool-card .name,
+.resource-card .name {
   font-family: var(--mono);
-  font-size: 13px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  padding: 3px 9px;
-  overflow-wrap: anywhere;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--aqua);
 }
+.tool-card .desc,
+.resource-card .desc {
+  color: var(--text-dim);
+  font-size: 13.5px;
+  margin: 4px 0 10px;
+}
+.tool-card .args { margin: 0; padding: 0; list-style: none; }
+.tool-card .args li {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 4px 12px;
+  font-size: 13px;
+  padding: 3px 0;
+}
+.tool-card .args .arg {
+  font-family: var(--mono);
+  color: var(--accent-2);
+}
+.tool-card .args .arg .req { color: var(--danger); }
+.tool-card .args .type {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.tool-card .args .arg-desc {
+  color: var(--text-dim);
+}
+/* Узкий экран: аргумент инструмента и описание — в столбик. */
+@media (max-width: 560px) {
+  .tool-card .args li { grid-template-columns: 1fr; }
+}
+
+/* ── строки с копированием ──────────────────────────────── */
 
 .copy-row {
   display: flex;
@@ -439,6 +477,16 @@ code.inline, .copy-line {
   white-space: nowrap;
   overflow-x: auto;
   scrollbar-width: thin;
+}
+
+code.inline, .copy-line {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 3px 9px;
+  overflow-wrap: anywhere;
 }
 
 /* ── OAuth-экран ────────────────────────────────────────── */

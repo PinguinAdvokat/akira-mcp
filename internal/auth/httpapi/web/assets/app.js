@@ -242,13 +242,10 @@
     var wrap = el("span");
     wrap.innerHTML =
       '<svg width="' + size + '" height="' + size + '" viewBox="0 0 64 64" aria-hidden="true">' +
-      '<defs><linearGradient id="g' + size + '" x1="0" y1="0" x2="1" y2="1">' +
-      '<stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#4cc2ff"/>' +
-      "</linearGradient></defs>" +
-      '<rect width="64" height="64" rx="14" fill="#10131c"/>' +
-      '<path d="M32 12c-9 0-15 6.5-15 15v25l5-4 5 4 5-4 5 4 5-4 5 4V27c0-8.5-6-15-15-15z" fill="url(#g' + size + ')"/>' +
-      '<circle cx="26" cy="27" r="3" fill="#10131c"/>' +
-      '<circle cx="38" cy="27" r="3" fill="#10131c"/></svg>';
+      '<rect width="64" height="64" rx="14" fill="#282828"/>' +
+      '<path d="M32 12c-9 0-15 6.5-15 15v25l5-4 5 4 5-4 5 4 5-4 5 4V27c0-8.5-6-15-15-15z" fill="#fe8019"/>' +
+      '<circle cx="26" cy="27" r="3" fill="#282828"/>' +
+      '<circle cx="38" cy="27" r="3" fill="#282828"/></svg>';
     return wrap.firstChild;
   }
 
@@ -688,12 +685,58 @@
     head.appendChild(el("h2", { text: "Ваш аккаунт" }));
     page.appendChild(head);
 
-    var grid = el("div", { class: "grid" });
+    // ── команда подключения машины ──
+    page.appendChild(connectPanel(me));
 
-    // ── панель: аккаунт и connect_key ──
-    var accPanel = el("div", { class: "panel" });
-    accPanel.appendChild(el("h3", { text: "Аккаунт" }));
-    accPanel.appendChild(el("p", { class: "panel-sub", text: "Данные пользователя и ключ подключения машин" }));
+    // ── компактный блок аккаунта ──
+    page.appendChild(accountPanel(me));
+
+    // ── описание проекта ──
+    page.appendChild(aboutSection());
+
+    // ── инструменты и ресурсы MCP-сервера ──
+    page.appendChild(toolsSection());
+    page.appendChild(resourcesSection());
+
+    wrapScreen(me, page);
+  }
+
+  // connectPanel — команда подключения машины: одна строка
+  // сверху страницы, с копированием. Скрипт /sh (install.go)
+  // скачивает akira-client с GitHub Releases и запускает его.
+  function connectPanel(me) {
+    var panel = el("div", { class: "panel" });
+    panel.appendChild(el("h3", { text: "Подключение машины" }));
+    panel.appendChild(el("p", {
+      class: "panel-sub",
+      text: "Выполните команду на машине, которую хотите подключить к своему аккаунту",
+    }));
+
+    var cmd = "bash <(curl -sL " + publicOrigin() + "/sh) " + (me.connect_key || "");
+
+    var row = el("div", { class: "connect-command" });
+    var line = el("code", { class: "copy-line" });
+    line.appendChild(document.createTextNode("bash <(curl -sL " + publicOrigin() + "/sh) "));
+    line.appendChild(el("span", { class: "key", text: me.connect_key || "—" }));
+    line.title = "Нажмите, чтобы скопировать";
+    line.addEventListener("click", function () { copyText(cmd, "Команда скопирована"); });
+    row.appendChild(line);
+    row.appendChild(copyButton(cmd, "Команда скопирована"));
+    panel.appendChild(row);
+
+    panel.appendChild(el("p", {
+      class: "faint",
+      text: "Скрипт скачает akira-client с GitHub Releases, спросит имя машины (client_id; " +
+        "по умолчанию — hostname) и запустит его в фоне (лог — /tmp/akira-client.log).",
+    }));
+
+    return panel;
+  }
+
+  // accountPanel — данные пользователя и управление ключом.
+  function accountPanel(me) {
+    var panel = el("div", { class: "panel mt-16" });
+    panel.appendChild(el("h3", { text: "Аккаунт" }));
 
     var kv = el("dl", { class: "kv" });
     kv.appendChild(el("dt", { text: "Логин" }));
@@ -706,26 +749,14 @@
         : el("span", { class: "badge badge-warn", text: "не подтверждён" }),
     ]));
 
-    // connect_key с кнопкой показать/скрыть, копированием и регенерацией.
+    // connect_key: значение + копирование.
     kv.appendChild(el("dt", { text: "connect_key" }));
-    var keyVisible = false;
-    var keyText = el("span", { class: "key-value", text: "••••••••••" });
-    var eyeBtn = el("button", { class: "icon-btn", title: "Показать ключ" });
-    eyeBtn.innerHTML =
-      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
-    var copyKeyBtn = el("button", { class: "icon-btn", title: "Скопировать ключ" });
-    copyKeyBtn.innerHTML =
-      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-    copyKeyBtn.addEventListener("click", function () {
-      copyText(me.connect_key || "", "Ключ скопирован");
-    });
-    eyeBtn.addEventListener("click", function () {
-      keyVisible = !keyVisible;
-      keyText.textContent = keyVisible ? (me.connect_key || "—") : "••••••••••";
-      eyeBtn.style.opacity = keyVisible ? "1" : "";
-    });
-    kv.appendChild(el("dd", {}, [keyText, eyeBtn, copyKeyBtn]));
-    accPanel.appendChild(kv);
+    var keyRow = el("dd", {}, [
+      el("span", { class: "key-value", text: me.connect_key || "—" }),
+      copyButton(me.connect_key || "", "Ключ скопирован"),
+    ]);
+    kv.appendChild(keyRow);
+    panel.appendChild(kv);
 
     var regenBtn = el("button", { class: "btn btn-danger btn-sm", text: "Перегенерировать ключ" });
     regenBtn.addEventListener("click", function () {
@@ -737,92 +768,132 @@
       request("/connect-key/regenerate", { method: "POST" })
         .then(function (resp) {
           me.connect_key = resp.connect_key;
-          keyText.textContent = keyVisible ? me.connect_key : "••••••••••";
           toast("Новый ключ сгенерирован", "ok");
-          regenBtn.disabled = false;
+          // Команда подключения содержит ключ — перерисовываем страницу.
+          drawDashboard(me);
         })
         .catch(function (err) { toast(err.message, "error"); regenBtn.disabled = false; });
     });
     var regenRow = el("div", { class: "mt-16" });
     regenRow.appendChild(regenBtn);
-    accPanel.appendChild(regenRow);
+    panel.appendChild(regenRow);
 
-    // Подсказка про ключ.
-    accPanel.appendChild(el("p", {
-      class: "faint",
-      text: "connect_key используется akira-client для подключения машины к вашему аккаунту.",
-    }));
-
-    grid.appendChild(accPanel);
-
-    // ── панель: подключение MCP-хостов и машин ──
-    grid.appendChild(mcpPanel(me));
-
-    page.appendChild(grid);
-    wrapScreen(me, page);
-  }
-
-  function mcpPanel(me) {
-    var panel = el("div", { class: "panel" });
-    panel.appendChild(el("h3", { text: "Подключение" }));
-    panel.appendChild(el("p", {
-      class: "panel-sub",
-      text: "MCP-хосты (Claude, IDE, любые MCP-клиенты) и ваши машины",
-    }));
-
-    var steps = el("ol", { class: "steps" });
-
-    // Шаг 1: добавить MCP-сервер в хост.
-    var li1 = el("li", { class: "done" });
-    li1.appendChild(el("h4", { text: "MCP-сервер уже работает" }));
-    li1.appendChild(el("p", {
-      text: "Укажите этот URL в настройках вашего MCP-хоста. Авторизация откроется здесь же.",
-    }));
-    li1.appendChild(copyRow(publicOrigin() + "/mcp", "MCP URL"));
-    steps.appendChild(li1);
-
-    // Шаг 2: подключить машину.
-    var li2 = el("li");
-    li2.appendChild(el("h4", { text: "Подключите машину" }));
-    li2.appendChild(el("p", {
-      text: "Запустите akira-client на вашей машине с вашим connect_key:",
-    }));
-
-    var clientCmd = "go run github.com/PinguinAdvokat/akira-mcp/cmd/akira-client@latest \\\n" +
-      "  -server " + publicOrigin().replace(/^https?:\/\//, "") + " \\\n" +
-      "  -client-id my-machine \\\n" +
-      "  -connect-key <ваш_connect_key>";
-    li2.appendChild(copyRow(clientCmd, "команда akira-client", true));
-    li2.appendChild(el("p", {
-      class: "faint",
-      text: "client-id — произвольное имя машины (латиницей, без «:»); -server — адрес этого Akira (порт 80/443 через nginx).",
-    }));
-    steps.appendChild(li2);
-
-    // Шаг 3: готово.
-    var li3 = el("li");
-    li3.appendChild(el("h4", { text: "Готово" }));
-    li3.appendChild(el("p", {
-      text: "После подключения машины доступны хосту через инструменты exec, read_file и write_file. Перечень машин — ресурс akira://machines.",
-    }));
-    steps.appendChild(li3);
-
-    panel.appendChild(steps);
     return panel;
   }
 
-  function copyRow(text, label, multiline) {
+  // aboutSection — что такое Akira и как подключить MCP-хост.
+  function aboutSection() {
+    var section = el("div", { class: "section" });
+    section.appendChild(el("h3", { class: "section-title", text: "Об Akira" }));
+
+    var about = el("p", { class: "section-sub" });
+    about.appendChild(document.createTextNode(
+      "Akira — доступ к своим машинам через MCP. Каждая машина держит постоянный канал " +
+      "с сервером (akira-client), а MCP-хост — Claude, IDE, любой MCP-клиент — подключается " +
+      "к серверу по URL ниже, проходит OAuth-авторизацию (окно откроется здесь же) и получает " +
+      "доступ к вашим машинам: выполняет команды, читает и пишет файлы. Ваши машины видит " +
+      "только ваш аккаунт."
+    ));
+    section.appendChild(about);
+
+    section.appendChild(el("p", { class: "panel-sub", text: "MCP URL для вашего хоста:" }));
+    section.appendChild(copyRow(publicOrigin() + "/mcp", "MCP URL"));
+
+    return section;
+  }
+
+  // toolsSection — список инструментов MCP-сервера
+  // (см. internal/akira-server/mcp/tools.go).
+  function toolsSection() {
+    var section = el("div", { class: "section" });
+    section.appendChild(el("h3", { class: "section-title", text: "Инструменты" }));
+
+    var list = el("div", { class: "tool-list" });
+
+    list.appendChild(toolCard("exec", "Выполнить shell-команду на машине и получить stdout, stderr и код возврата.", [
+      { name: "client_id", type: "string", required: true, desc: "Машина для выполнения команды (из akira://machines)" },
+      { name: "cmd", type: "string", required: true, desc: "Shell-команда" },
+      { name: "timeout_ms", type: "number", required: false, desc: "Таймаут выполнения в миллисекундах; по умолчанию и максимум — лимит сервера" },
+    ]));
+
+    list.appendChild(toolCard("write_file", "Записать файл на машине.", [
+      { name: "client_id", type: "string", required: true, desc: "Машина для записи файла (из akira://machines)" },
+      { name: "path", type: "string", required: true, desc: "Абсолютный путь файла" },
+      { name: "content", type: "string", required: true, desc: "Содержимое файла (UTF-8)" },
+      { name: "create_dirs", type: "boolean", required: false, desc: "Создавать родительские каталоги (по умолчанию true)" },
+    ]));
+
+    section.appendChild(list);
+    return section;
+  }
+
+  // resourcesSection — список ресурсов MCP-сервера
+  // (см. internal/akira-server/mcp/resources.go).
+  function resourcesSection() {
+    var section = el("div", { class: "section" });
+    section.appendChild(el("h3", { class: "section-title", text: "Ресурсы" }));
+
+    var list = el("div", { class: "tool-list" });
+
+    var machines = el("div", { class: "resource-card" });
+    machines.appendChild(el("div", { class: "name", text: "akira://machines" }));
+    machines.appendChild(el("div", {
+      class: "desc",
+      text: "Подключённые машины пользователя: client_id, hostname, platform. Значение client_id используется в инструментах и URI файлов.",
+    }));
+    list.appendChild(machines);
+
+    var file = el("div", { class: "resource-card" });
+    file.appendChild(el("div", { class: "name", text: "akira://file/{client_id}/{+path}" }));
+    file.appendChild(el("div", {
+      class: "desc",
+      text: "Чтение файла с машины (client_id — из akira://machines, path — многоуровневый путь). Текст отдаётся как есть, бинарное — base64. Именно так доступно чтение файлов — отдельного инструмента нет.",
+    }));
+    list.appendChild(file);
+
+    section.appendChild(list);
+    return section;
+  }
+
+  // toolCard — карточка инструмента: имя, описание, аргументы.
+  function toolCard(name, desc, args) {
+    var card = el("div", { class: "tool-card" });
+    card.appendChild(el("div", { class: "name", text: name }));
+    card.appendChild(el("div", { class: "desc", text: desc }));
+
+    var ul = el("ul", { class: "args" });
+    args.forEach(function (a) {
+      var li = el("li");
+      var arg = el("span", { class: "arg" });
+      arg.appendChild(document.createTextNode(a.name));
+      if (a.required) arg.appendChild(el("span", { class: "req", text: " *" }));
+      arg.appendChild(document.createTextNode(" "));
+      arg.appendChild(el("span", { class: "type", text: a.type }));
+      li.appendChild(arg);
+      li.appendChild(el("span", { class: "arg-desc", text: a.desc }));
+      ul.appendChild(li);
+    });
+    card.appendChild(ul);
+    return card;
+  }
+
+  // copyButton — иконка копирования; okMsg — текст тоста.
+  function copyButton(text, okMsg) {
+    var btn = el("button", { class: "icon-btn", title: "Скопировать" });
+    btn.innerHTML =
+      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    btn.addEventListener("click", function () { copyText(text, okMsg); });
+    return btn;
+  }
+
+  // copyRow — моноширинная строка с копированием (MCP URL и т.п.).
+  function copyRow(text, label) {
     var row = el("div", { class: "copy-row" });
     var line = el("code", { class: "copy-line", text: text });
-    if (multiline) line.style.whiteSpace = "pre";
     line.title = "Нажмите, чтобы скопировать";
     line.addEventListener("click", function () { copyText(text, label + " скопирован"); });
     row.appendChild(line);
-    var btn = el("button", { class: "icon-btn", title: "Скопировать " + label });
-    btn.innerHTML =
-      '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-    btn.addEventListener("click", function () { copyText(text, label + " скопирован"); });
-    row.appendChild(btn);
+    row.appendChild(copyButton(text, label + " скопирован"));
     return row;
   }
 
@@ -859,7 +930,7 @@
     } catch (e) { /* redirect_uri уже провалидирован сервисом */ }
     var badge = el("div", { class: "oauth-badge" });
     badge.innerHTML =
-      '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4cc2ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>';
+      '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#83a598" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>';
     badge.appendChild(el("span", {}, [document.createTextNode(badgeText)]));
     card.appendChild(badge);
 
