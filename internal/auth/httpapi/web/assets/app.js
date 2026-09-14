@@ -811,16 +811,42 @@
     var list = el("div", { class: "tool-list" });
 
     list.appendChild(toolCard("exec", "Выполнить shell-команду на машине и получить stdout, stderr и код возврата.", [
-      { name: "client_id", type: "string", required: true, desc: "Машина для выполнения команды (из akira://machines)" },
+      { name: "host", type: "string", required: true, desc: "Машина для выполнения команды (client_id из akira://machines)" },
       { name: "cmd", type: "string", required: true, desc: "Shell-команда" },
       { name: "timeout_ms", type: "number", required: false, desc: "Таймаут выполнения в миллисекундах; по умолчанию и максимум — лимит сервера" },
     ]));
 
-    list.appendChild(toolCard("write_file", "Записать файл на машине.", [
-      { name: "client_id", type: "string", required: true, desc: "Машина для записи файла (из akira://machines)" },
+    list.appendChild(toolCard("read", "Прочитать текстовый файл на машине: содержимое с нумерацией строк (cat -n), начиная со строки offset. Бинарные файлы не поддерживаются — используйте exec с base64.", [
+      { name: "host", type: "string", required: true, desc: "Машина, на которой читать файл (client_id из akira://machines)" },
+      { name: "path", type: "string", required: true, desc: "Абсолютный путь файла" },
+      { name: "offset", type: "number", required: false, desc: "Номер первой строки (с 1; по умолчанию 1)" },
+      { name: "limit", type: "number", required: false, desc: "Сколько строк прочитать (по умолчанию 2000)" },
+    ]));
+
+    list.appendChild(toolCard("edit", "Заменить точную подстроку в файле на машине. old_str должен встречаться в файле ровно один раз, либо укажите replace_all для замены всех вхождений.", [
+      { name: "host", type: "string", required: true, desc: "Машина, на которой менять файл (client_id из akira://machines)" },
+      { name: "path", type: "string", required: true, desc: "Абсолютный путь файла" },
+      { name: "old_str", type: "string", required: true, desc: "Точная заменяемая строка (уникальна, если не задан replace_all)" },
+      { name: "new_str", type: "string", required: true, desc: "Строка замены" },
+      { name: "replace_all", type: "boolean", required: false, desc: "Заменить все вхождения old_str (по умолчанию false)" },
+    ]));
+
+    list.appendChild(toolCard("write", "Записать файл на машине; родительские каталоги создаются при необходимости. Существующий файл сохраняет права, новый — 0644.", [
+      { name: "host", type: "string", required: true, desc: "Машина для записи файла (client_id из akira://machines)" },
       { name: "path", type: "string", required: true, desc: "Абсолютный путь файла" },
       { name: "content", type: "string", required: true, desc: "Содержимое файла (UTF-8)" },
-      { name: "create_dirs", type: "boolean", required: false, desc: "Создавать родительские каталоги (по умолчанию true)" },
+    ]));
+
+    list.appendChild(toolCard("glob", "Найти файлы на машине по glob-шаблону (**, *, ?, [class]) и получить список абсолютных путей.", [
+      { name: "host", type: "string", required: true, desc: "Машина для поиска (client_id из akira://machines)" },
+      { name: "pattern", type: "string", required: true, desc: "Шаблон относительно path, например \"**/*.go\"" },
+      { name: "path", type: "string", required: false, desc: "Базовый каталог поиска (по умолчанию — рабочий каталог клиента)" },
+    ]));
+
+    list.appendChild(toolCard("list", "Показать содержимое каталога на машине до заданной глубины; каталоги помечаются суффиксом '/'.", [
+      { name: "host", type: "string", required: true, desc: "Машина, где смотреть каталог (client_id из akira://machines)" },
+      { name: "path", type: "string", required: true, desc: "Абсолютный путь каталога" },
+      { name: "depth", type: "number", required: false, desc: "Глубина обхода (1 — только непосредственные дети; по умолчанию 1, максимум 32)" },
     ]));
 
     section.appendChild(list);
@@ -839,17 +865,9 @@
     machines.appendChild(el("div", { class: "name", text: "akira://machines" }));
     machines.appendChild(el("div", {
       class: "desc",
-      text: "Подключённые машины пользователя: client_id, hostname, platform. Значение client_id используется в инструментах и URI файлов.",
+      text: "Подключённые машины пользователя: client_id, hostname, platform. Значение client_id передаётся в аргумент host инструментов.",
     }));
     list.appendChild(machines);
-
-    var file = el("div", { class: "resource-card" });
-    file.appendChild(el("div", { class: "name", text: "akira://file/{client_id}/{+path}" }));
-    file.appendChild(el("div", {
-      class: "desc",
-      text: "Чтение файла с машины (client_id — из akira://machines, path — многоуровневый путь). Текст отдаётся как есть, бинарное — base64. Именно так доступно чтение файлов — отдельного инструмента нет.",
-    }));
-    list.appendChild(file);
 
     section.appendChild(list);
     return section;

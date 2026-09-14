@@ -69,8 +69,8 @@ func newTestEnv(t *testing.T, userID, clientID, hostname, platform string) *test
 // registerFakeClient регистрирует подключение в пуле и запускает
 // «клиента»: goroutine вычитывает задачи из очереди и возвращает
 // результаты в пул. Поведение эмулирует executor: exec отвечает
-// эхом с exit_code=0, read_file — фиксированным содержимым,
-// write_file — успехом.
+// эхом с exit_code=0, read_file — фиксированными строками, edit —
+// ошибкой для old_str="missing", glob/list — фиксированными списками.
 func registerFakeClient(t *testing.T, pool *connectionpool.ConnectionPool, userID, clientID, hostname, platform string) {
 	t.Helper()
 	conn, err := pool.Register(userID+":"+clientID, userID, connectionpool.ClientInfo{
@@ -92,6 +92,10 @@ func registerFakeClient(t *testing.T, pool *connectionpool.ConnectionPool, userI
 	t.Cleanup(func() { pool.Disconnect(userID + ":" + clientID) })
 }
 
+// fakeReadLines — файл из пяти строк, который отдаёт fakeExecute
+// для read_file.
+const fakeReadLines = "l1\nl2\nl3\nl4\nl5\n"
+
 // fakeExecute — эмуляция executor.Execute для тестов.
 func fakeExecute(task *pb.Task, owner string) *pb.TaskResult {
 	res := &pb.TaskResult{
@@ -105,9 +109,44 @@ func fakeExecute(task *pb.Task, owner string) *pb.TaskResult {
 		res.Stdout = []byte("echo:" + p.Exec.Cmd)
 		res.ExitCode = 0
 	case *pb.Task_ReadFile:
-		res.Stdout = []byte("content of " + p.ReadFile.Path)
+		lines := strings.Split(fakeReadLines, "\n")
+		if n := len(lines); n > 0 && lines[n-1] == "" {
+			lines = lines[:n-1]
+		}
+		if p.ReadFile.Offset > 1 || p.ReadFile.Limit > 0 {
+			off := int(p.ReadFile.Offset)
+			if off < 1 {
+				off = 1
+			}
+			if off > len(lines) {
+				lines = nil
+			} else {
+				lines = lines[off-1:]
+				if p.ReadFile.Limit > 0 && int(p.ReadFile.Limit) < len(lines) {
+					lines = lines[:p.ReadFile.Limit]
+				}
+			}
+		}
+		res.Stdout = []byte(strings.Join(lines, "\n"))
+		if len(lines) > 0 {
+			res.Stdout = append(res.Stdout, '\n')
+		}
+		res.TotalLines = 5
 	case *pb.Task_WriteFile:
 		// успех без содержимого
+	case *pb.Task_EditFile:
+		if p.EditFile.OldStr == "missing" {
+			res.Status = pb.TaskResult_STATUS_ERROR
+			res.Error = "old_str not found in " + p.EditFile.Path
+		} else {
+			res.Stdout = []byte("replaced 1 occurrence(s)")
+		}
+	case *pb.Task_Glob:
+		res.Stdout = []byte("/a.go\n/b/c.go\n")
+		res.TotalLines = 2
+	case *pb.Task_List:
+		res.Stdout = []byte("sub/\nfile.txt\n")
+		res.TotalLines = 2
 	default:
 		res.Status = pb.TaskResult_STATUS_ERROR
 		res.Error = "unknown task type"
@@ -215,8 +254,13 @@ func TestMCPToolsList(t *testing.T) {
 		t.Fatalf("tools/list: status %d, body %v", code, body)
 	}
 	names := toolNames(body)
-	if !names["exec"] || !names["write_file"] {
-		t.Fatalf("tools/list: want exec and write_file, got %v", names)
+	for _, want := range []string{"exec", "read", "edit", "write", "glob", "list"} {
+		if !names[want] {
+			t.Errorf("tools/list: want %q, got %v", want, names)
+		}
+	}
+	if len(names) != 6 {
+		t.Errorf("tools/list: want exactly 6 tools, got %d (%v)", len(names), names)
 	}
 }
 
@@ -227,8 +271,8 @@ func TestMCPExecTool(t *testing.T) {
 	code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
 		"name": "exec",
 		"arguments": map[string]any{
-			"client_id": "laptop1",
-			"cmd":       "echo hi",
+			"host": "laptop1",
+			"cmd":  "echo hi",
 		},
 	})
 	if code != http.StatusOK {
@@ -243,34 +287,209 @@ func TestMCPExecTool(t *testing.T) {
 	}
 }
 
-func TestMCPWriteFileTool(t *testing.T) {
+func TestMCPWriteTool(t *testing.T) {
 	e := newTestEnv(t, "user1", "laptop1", "host1", "linux")
 	proto := e.initMCP(t)
 
 	code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
-		"name": "write_file",
+		"name": "write",
 		"arguments": map[string]any{
-			"client_id": "laptop1",
-			"path":      "/tmp/x.txt",
-			"content":   "hello",
+			"host":    "laptop1",
+			"path":    "/tmp/x.txt",
+			"content": "hello",
 		},
 	})
 	if code != http.StatusOK {
 		t.Fatalf("tools/call: status %d, body %v", code, body)
 	}
 	if !strings.Contains(toolResultText(t, body), "/tmp/x.txt") {
-		t.Fatalf("write_file result should mention path")
+		t.Fatalf("write result should mention path")
 	}
+}
+
+// TestMCPReadTool — read отдаёт содержимое с нумерацией строк cat -n:
+// ширина номера — max(3, разрядов последней строки), затем таб.
+func TestMCPReadTool(t *testing.T) {
+	e := newTestEnv(t, "user1", "laptop1", "host1", "linux")
+	proto := e.initMCP(t)
+
+	t.Run("full", func(t *testing.T) {
+		code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
+			"name": "read",
+			"arguments": map[string]any{
+				"host": "laptop1",
+				"path": "/etc/hostname",
+			},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("tools/call: status %d, body %v", code, body)
+		}
+		text := toolResultText(t, body)
+		if !strings.HasPrefix(text, "  1\tl1\n") {
+			t.Fatalf("read result = %q, want cat -n numbering", text)
+		}
+		if !strings.Contains(text, "[1-5 of 5 lines]") {
+			t.Fatalf("read result = %q, want footer [1-5 of 5 lines]", text)
+		}
+	})
+
+	t.Run("window", func(t *testing.T) {
+		code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
+			"name": "read",
+			"arguments": map[string]any{
+				"host":   "laptop1",
+				"path":   "/etc/hostname",
+				"offset": 2,
+				"limit":  2,
+			},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("tools/call: status %d, body %v", code, body)
+		}
+		text := toolResultText(t, body)
+		if text != "  2\tl2\n  3\tl3\n[2-3 of 5 lines]\n" {
+			t.Fatalf("read window = %q", text)
+		}
+	})
+
+	t.Run("offset_beyond_eof", func(t *testing.T) {
+		code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
+			"name": "read",
+			"arguments": map[string]any{
+				"host":   "laptop1",
+				"path":   "/etc/hostname",
+				"offset": 99,
+			},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("tools/call: status %d, body %v", code, body)
+		}
+		if !toolIsError(t, body) {
+			t.Fatalf("offset beyond EOF must be an error, got %v", body)
+		}
+		if msg := toolResultText(t, body); !strings.Contains(msg, "only 5 lines") {
+			t.Fatalf("error text = %q, want 'only 5 lines'", msg)
+		}
+	})
+
+	t.Run("offset_zero_is_error", func(t *testing.T) {
+		code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
+			"name": "read",
+			"arguments": map[string]any{
+				"host":   "laptop1",
+				"path":   "/etc/hostname",
+				"offset": 0,
+			},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("tools/call: status %d, body %v", code, body)
+		}
+		if !toolIsError(t, body) {
+			t.Fatalf("offset 0 must be an error, got %v", body)
+		}
+	})
+}
+
+func TestMCPEditTool(t *testing.T) {
+	e := newTestEnv(t, "user1", "laptop1", "host1", "linux")
+	proto := e.initMCP(t)
+
+	t.Run("success", func(t *testing.T) {
+		code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
+			"name": "edit",
+			"arguments": map[string]any{
+				"host":    "laptop1",
+				"path":    "/etc/app.conf",
+				"old_str": "debug=false",
+				"new_str": "debug=true",
+			},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("tools/call: status %d, body %v", code, body)
+		}
+		text := toolResultText(t, body)
+		if !strings.Contains(text, "edited /etc/app.conf") || !strings.Contains(text, "replaced 1 occurrence(s)") {
+			t.Fatalf("edit result = %q", text)
+		}
+	})
+
+	t.Run("not_found", func(t *testing.T) {
+		code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
+			"name": "edit",
+			"arguments": map[string]any{
+				"host":    "laptop1",
+				"path":    "/etc/app.conf",
+				"old_str": "missing",
+				"new_str": "x",
+			},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("tools/call: status %d, body %v", code, body)
+		}
+		if !toolIsError(t, body) {
+			t.Fatalf("edit with missing old_str must be an error, got %v", body)
+		}
+		if msg := toolResultText(t, body); !strings.Contains(msg, "old_str not found") {
+			t.Fatalf("error text = %q, want 'old_str not found'", msg)
+		}
+	})
+}
+
+func TestMCPGlobListTools(t *testing.T) {
+	e := newTestEnv(t, "user1", "laptop1", "host1", "linux")
+	proto := e.initMCP(t)
+
+	t.Run("glob", func(t *testing.T) {
+		code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
+			"name": "glob",
+			"arguments": map[string]any{
+				"host":    "laptop1",
+				"pattern": "**/*.go",
+				"path":    "/src",
+			},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("tools/call: status %d, body %v", code, body)
+		}
+		if text := toolResultText(t, body); text != "/a.go\n/b/c.go" {
+			t.Fatalf("glob result = %q", text)
+		}
+	})
+
+	t.Run("list", func(t *testing.T) {
+		code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
+			"name": "list",
+			"arguments": map[string]any{
+				"host":  "laptop1",
+				"path":  "/src",
+				"depth": 2,
+			},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("tools/call: status %d, body %v", code, body)
+		}
+		if text := toolResultText(t, body); text != "sub/\nfile.txt" {
+			t.Fatalf("list result = %q", text)
+		}
+	})
 }
 
 func TestMCPMachinesResource(t *testing.T) {
 	e := newTestEnv(t, "user1", "laptop1", "host1", "linux")
 	proto := e.initMCP(t)
 
-	// Список ресурсов: ресурс machines заявлен.
+	// Список ресурсов: только статический machines, шаблонов нет.
 	code, body := e.rpc(t, e.token, proto, "resources/list", nil)
 	if code != http.StatusOK {
 		t.Fatalf("resources/list: status %d, body %v", code, body)
+	}
+	res, _ := body["result"].(map[string]any)
+	items, _ := res["resources"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("resources/list: want 1 resource, got %d (%v)", len(items), items)
+	}
+	if item, ok := items[0].(map[string]any); !ok || item["uri"] != machinesResourceURI {
+		t.Fatalf("resources/list: want %s, got %v", machinesResourceURI, items)
 	}
 
 	code, body = e.rpc(t, e.token, proto, "resources/read", map[string]any{
@@ -283,22 +502,6 @@ func TestMCPMachinesResource(t *testing.T) {
 	want := `[{"client_id":"laptop1","hostname":"host1","platform":"linux"}]`
 	if text != want {
 		t.Fatalf("machines = %q, want %q", text, want)
-	}
-}
-
-func TestMCPFileResource(t *testing.T) {
-	e := newTestEnv(t, "user1", "laptop1", "host1", "linux")
-	proto := e.initMCP(t)
-
-	code, body := e.rpc(t, e.token, proto, "resources/read", map[string]any{
-		"uri": "akira://file/laptop1/etc/hostname",
-	})
-	if code != http.StatusOK {
-		t.Fatalf("resources/read file: status %d, body %v", code, body)
-	}
-	// {+path} пропускает слэши: путь многоуровневый.
-	if got := resourceText(t, body); got != "content of etc/hostname" {
-		t.Fatalf("file content = %q, want %q", got, "content of etc/hostname")
 	}
 }
 
@@ -411,8 +614,8 @@ func TestMCPUserIsolation(t *testing.T) {
 	code, body = e.rpc(t, otherToken, proto, "tools/call", map[string]any{
 		"name": "exec",
 		"arguments": map[string]any{
-			"client_id": "laptop1",
-			"cmd":       "echo pwned",
+			"host": "laptop1",
+			"cmd":  "echo pwned",
 		},
 	})
 	if code != http.StatusOK {
@@ -427,12 +630,12 @@ func TestMCPUserIsolation(t *testing.T) {
 		t.Fatalf("exec from user2 to user1's machine must fail, got %v", body)
 	}
 
-	// Подделка connection_id через ':' в client_id — тоже отказ.
+	// Подделка connection_id через ':' в host — тоже отказ.
 	code, body = e.rpc(t, otherToken, proto, "tools/call", map[string]any{
 		"name": "exec",
 		"arguments": map[string]any{
-			"client_id": "user1:laptop1",
-			"cmd":       "echo pwned",
+			"host": "user1:laptop1",
+			"cmd":  "echo pwned",
 		},
 	})
 	if code != http.StatusOK {
@@ -441,7 +644,7 @@ func TestMCPUserIsolation(t *testing.T) {
 	res, _ = body["result"].(map[string]any)
 	isErr, _ = res["isError"].(bool)
 	if !isErr {
-		t.Fatalf("client_id with ':' must be rejected, got %v", body)
+		t.Fatalf("host with ':' must be rejected, got %v", body)
 	}
 }
 
@@ -476,6 +679,17 @@ func toolResultText(t *testing.T, body map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// toolIsError сообщает, помечен ли CallToolResult как isError.
+func toolIsError(t *testing.T, body map[string]any) bool {
+	t.Helper()
+	res, ok := body["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("no result: %v", body)
+	}
+	isErr, _ := res["isError"].(bool)
+	return isErr
 }
 
 // resourceText достаёт текст первого TextResourceContents.

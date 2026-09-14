@@ -74,7 +74,7 @@ func (x TaskResult_Status) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TaskResult_Status.Descriptor instead.
 func (TaskResult_Status) EnumDescriptor() ([]byte, []int) {
-	return file_connection_v1_connection_proto_rawDescGZIP(), []int{10, 0}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{13, 0}
 }
 
 // ServerMessage — конверт для сообщений сервера в потоке Connect.
@@ -434,6 +434,9 @@ type Task struct {
 	//	*Task_Exec
 	//	*Task_ReadFile
 	//	*Task_WriteFile
+	//	*Task_EditFile
+	//	*Task_Glob
+	//	*Task_List
 	Payload   isTask_Payload         `protobuf_oneof:"payload"`
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// timeout_ms — лимит исполнения; 0 означает без таймаута.
@@ -513,6 +516,33 @@ func (x *Task) GetWriteFile() *WriteFileRequest {
 	return nil
 }
 
+func (x *Task) GetEditFile() *EditFileRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*Task_EditFile); ok {
+			return x.EditFile
+		}
+	}
+	return nil
+}
+
+func (x *Task) GetGlob() *GlobRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*Task_Glob); ok {
+			return x.Glob
+		}
+	}
+	return nil
+}
+
+func (x *Task) GetList() *ListRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*Task_List); ok {
+			return x.List
+		}
+	}
+	return nil
+}
+
 func (x *Task) GetCreatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CreatedAt
@@ -543,11 +573,29 @@ type Task_WriteFile struct {
 	WriteFile *WriteFileRequest `protobuf:"bytes,4,opt,name=write_file,json=writeFile,proto3,oneof"`
 }
 
+type Task_EditFile struct {
+	EditFile *EditFileRequest `protobuf:"bytes,7,opt,name=edit_file,json=editFile,proto3,oneof"`
+}
+
+type Task_Glob struct {
+	Glob *GlobRequest `protobuf:"bytes,8,opt,name=glob,proto3,oneof"`
+}
+
+type Task_List struct {
+	List *ListRequest `protobuf:"bytes,9,opt,name=list,proto3,oneof"`
+}
+
 func (*Task_Exec) isTask_Payload() {}
 
 func (*Task_ReadFile) isTask_Payload() {}
 
 func (*Task_WriteFile) isTask_Payload() {}
+
+func (*Task_EditFile) isTask_Payload() {}
+
+func (*Task_Glob) isTask_Payload() {}
+
+func (*Task_List) isTask_Payload() {}
 
 // ExecTask — запуск процесса.
 type ExecTask struct {
@@ -594,12 +642,18 @@ func (x *ExecTask) GetCmd() string {
 	return ""
 }
 
-// ReadFileRequest — прочитать файл и вернуть содержимое.
+// ReadFileRequest — прочитать окно строк файла и вернуть содержимое.
 type ReadFileRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Path  string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	// max_bytes — ограничение размера ответа; 0 = без ограничения.
-	MaxBytes      int64 `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
+	// max_bytes — ограничение размера ответа (применяется к окну);
+	// 0 = без ограничения.
+	MaxBytes int64 `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
+	// offset — номер первой строки окна (1-based); 0 или 1 — с начала.
+	Offset int64 `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
+	// limit — сколько строк вернуть; 0 = без ограничения строк
+	// (объём ответа всё равно ограничен max_bytes).
+	Limit         int64 `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -644,6 +698,20 @@ func (x *ReadFileRequest) GetPath() string {
 func (x *ReadFileRequest) GetMaxBytes() int64 {
 	if x != nil {
 		return x.MaxBytes
+	}
+	return 0
+}
+
+func (x *ReadFileRequest) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *ReadFileRequest) GetLimit() int64 {
+	if x != nil {
+		return x.Limit
 	}
 	return 0
 }
@@ -709,6 +777,187 @@ func (x *WriteFileRequest) GetCreateDirs() bool {
 	return false
 }
 
+// EditFileRequest — заменить вхождения old_str на new_str.
+// При replace_all = false строка old_str обязана встречаться
+// в файле ровно один раз, иначе задача завершается STATUS_ERROR.
+type EditFileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	OldStr        string                 `protobuf:"bytes,2,opt,name=old_str,json=oldStr,proto3" json:"old_str,omitempty"`
+	NewStr        string                 `protobuf:"bytes,3,opt,name=new_str,json=newStr,proto3" json:"new_str,omitempty"`
+	ReplaceAll    bool                   `protobuf:"varint,4,opt,name=replace_all,json=replaceAll,proto3" json:"replace_all,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EditFileRequest) Reset() {
+	*x = EditFileRequest{}
+	mi := &file_connection_v1_connection_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EditFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EditFileRequest) ProtoMessage() {}
+
+func (x *EditFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_connection_v1_connection_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EditFileRequest.ProtoReflect.Descriptor instead.
+func (*EditFileRequest) Descriptor() ([]byte, []int) {
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *EditFileRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *EditFileRequest) GetOldStr() string {
+	if x != nil {
+		return x.OldStr
+	}
+	return ""
+}
+
+func (x *EditFileRequest) GetNewStr() string {
+	if x != nil {
+		return x.NewStr
+	}
+	return ""
+}
+
+func (x *EditFileRequest) GetReplaceAll() bool {
+	if x != nil {
+		return x.ReplaceAll
+	}
+	return false
+}
+
+// GlobRequest — поиск файлов по шаблону (**, *, ?, [class])
+// в каталоге path и ниже.
+type GlobRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// path — базовый каталог поиска (абсолютный путь).
+	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// pattern — шаблон относительно path, например "**/*.go".
+	Pattern       string `protobuf:"bytes,2,opt,name=pattern,proto3" json:"pattern,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GlobRequest) Reset() {
+	*x = GlobRequest{}
+	mi := &file_connection_v1_connection_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GlobRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GlobRequest) ProtoMessage() {}
+
+func (x *GlobRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_connection_v1_connection_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GlobRequest.ProtoReflect.Descriptor instead.
+func (*GlobRequest) Descriptor() ([]byte, []int) {
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GlobRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *GlobRequest) GetPattern() string {
+	if x != nil {
+		return x.Pattern
+	}
+	return ""
+}
+
+// ListRequest — листинг каталога path до глубины depth.
+type ListRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Path  string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	// depth — глубина обхода: 1 = только непосредственные дети.
+	Depth         int32 `protobuf:"varint,2,opt,name=depth,proto3" json:"depth,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListRequest) Reset() {
+	*x = ListRequest{}
+	mi := &file_connection_v1_connection_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListRequest) ProtoMessage() {}
+
+func (x *ListRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_connection_v1_connection_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListRequest.ProtoReflect.Descriptor instead.
+func (*ListRequest) Descriptor() ([]byte, []int) {
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ListRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *ListRequest) GetDepth() int32 {
+	if x != nil {
+		return x.Depth
+	}
+	return 0
+}
+
 // TaskResult — результат исполнения команды.
 type TaskResult struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
@@ -728,14 +977,20 @@ type TaskResult struct {
 	// ({user_id}:{client_id}, выдаётся в RegisterResponse). Сервер
 	// сверяет его с владельцем ожидающей задачи; пустое значение
 	// принимается (совместимость со старыми клиентами).
-	ClientId      string `protobuf:"bytes,8,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ClientId string `protobuf:"bytes,8,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	// total_lines — read_file: всего строк в файле; glob/list: всего
+	// записей до ограничения. 0 = не известно.
+	TotalLines int64 `protobuf:"varint,9,opt,name=total_lines,json=totalLines,proto3" json:"total_lines,omitempty"`
+	// truncated — ответ обрезан ограничением (max_bytes для read,
+	// лимит записей для glob/list).
+	Truncated     bool `protobuf:"varint,10,opt,name=truncated,proto3" json:"truncated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskResult) Reset() {
 	*x = TaskResult{}
-	mi := &file_connection_v1_connection_proto_msgTypes[10]
+	mi := &file_connection_v1_connection_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -747,7 +1002,7 @@ func (x *TaskResult) String() string {
 func (*TaskResult) ProtoMessage() {}
 
 func (x *TaskResult) ProtoReflect() protoreflect.Message {
-	mi := &file_connection_v1_connection_proto_msgTypes[10]
+	mi := &file_connection_v1_connection_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -760,7 +1015,7 @@ func (x *TaskResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskResult.ProtoReflect.Descriptor instead.
 func (*TaskResult) Descriptor() ([]byte, []int) {
-	return file_connection_v1_connection_proto_rawDescGZIP(), []int{10}
+	return file_connection_v1_connection_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TaskResult) GetTaskId() string {
@@ -819,6 +1074,20 @@ func (x *TaskResult) GetClientId() string {
 	return ""
 }
 
+func (x *TaskResult) GetTotalLines() int64 {
+	if x != nil {
+		return x.TotalLines
+	}
+	return 0
+}
+
+func (x *TaskResult) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
 var File_connection_v1_connection_proto protoreflect.FileDescriptor
 
 const file_connection_v1_connection_proto_rawDesc = "" +
@@ -843,28 +1112,45 @@ const file_connection_v1_connection_proto_rawDesc = "" +
 	"\x04Ping\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\"\x18\n" +
 	"\x04Pong\x12\x10\n" +
-	"\x03seq\x18\x01 \x01(\x03R\x03seq\"\xbd\x02\n" +
+	"\x03seq\x18\x01 \x01(\x03R\x03seq\"\xf2\x03\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x123\n" +
 	"\x04exec\x18\x02 \x01(\v2\x1d.akira.connection.v1.ExecTaskH\x00R\x04exec\x12C\n" +
 	"\tread_file\x18\x03 \x01(\v2$.akira.connection.v1.ReadFileRequestH\x00R\breadFile\x12F\n" +
 	"\n" +
-	"write_file\x18\x04 \x01(\v2%.akira.connection.v1.WriteFileRequestH\x00R\twriteFile\x129\n" +
+	"write_file\x18\x04 \x01(\v2%.akira.connection.v1.WriteFileRequestH\x00R\twriteFile\x12C\n" +
+	"\tedit_file\x18\a \x01(\v2$.akira.connection.v1.EditFileRequestH\x00R\beditFile\x126\n" +
+	"\x04glob\x18\b \x01(\v2 .akira.connection.v1.GlobRequestH\x00R\x04glob\x126\n" +
+	"\x04list\x18\t \x01(\v2 .akira.connection.v1.ListRequestH\x00R\x04list\x129\n" +
 	"\n" +
 	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x1d\n" +
 	"\n" +
 	"timeout_ms\x18\x06 \x01(\x03R\ttimeoutMsB\t\n" +
 	"\apayload\"\x1c\n" +
 	"\bExecTask\x12\x10\n" +
-	"\x03cmd\x18\x01 \x01(\tR\x03cmd\"B\n" +
+	"\x03cmd\x18\x01 \x01(\tR\x03cmd\"p\n" +
 	"\x0fReadFileRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1b\n" +
-	"\tmax_bytes\x18\x02 \x01(\x03R\bmaxBytes\"a\n" +
+	"\tmax_bytes\x18\x02 \x01(\x03R\bmaxBytes\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\x03R\x06offset\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x03R\x05limit\"a\n" +
 	"\x10WriteFileRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\fR\acontent\x12\x1f\n" +
 	"\vcreate_dirs\x18\x03 \x01(\bR\n" +
-	"createDirs\"\xf2\x02\n" +
+	"createDirs\"x\n" +
+	"\x0fEditFileRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x17\n" +
+	"\aold_str\x18\x02 \x01(\tR\x06oldStr\x12\x17\n" +
+	"\anew_str\x18\x03 \x01(\tR\x06newStr\x12\x1f\n" +
+	"\vreplace_all\x18\x04 \x01(\bR\n" +
+	"replaceAll\";\n" +
+	"\vGlobRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
+	"\apattern\x18\x02 \x01(\tR\apattern\"7\n" +
+	"\vListRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x14\n" +
+	"\x05depth\x18\x02 \x01(\x05R\x05depth\"\xb1\x03\n" +
 	"\n" +
 	"TaskResult\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12>\n" +
@@ -875,7 +1161,11 @@ const file_connection_v1_connection_proto_rawDesc = "" +
 	"\x05error\x18\x06 \x01(\tR\x05error\x12\x1f\n" +
 	"\vduration_ms\x18\a \x01(\x03R\n" +
 	"durationMs\x12\x1b\n" +
-	"\tclient_id\x18\b \x01(\tR\bclientId\"j\n" +
+	"\tclient_id\x18\b \x01(\tR\bclientId\x12\x1f\n" +
+	"\vtotal_lines\x18\t \x01(\x03R\n" +
+	"totalLines\x12\x1c\n" +
+	"\ttruncated\x18\n" +
+	" \x01(\bR\ttruncated\"j\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\r\n" +
 	"\tSTATUS_OK\x10\x01\x12\x10\n" +
@@ -900,7 +1190,7 @@ func file_connection_v1_connection_proto_rawDescGZIP() []byte {
 }
 
 var file_connection_v1_connection_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_connection_v1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_connection_v1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_connection_v1_connection_proto_goTypes = []any{
 	(TaskResult_Status)(0),        // 0: akira.connection.v1.TaskResult.Status
 	(*ServerMessage)(nil),         // 1: akira.connection.v1.ServerMessage
@@ -913,8 +1203,11 @@ var file_connection_v1_connection_proto_goTypes = []any{
 	(*ExecTask)(nil),              // 8: akira.connection.v1.ExecTask
 	(*ReadFileRequest)(nil),       // 9: akira.connection.v1.ReadFileRequest
 	(*WriteFileRequest)(nil),      // 10: akira.connection.v1.WriteFileRequest
-	(*TaskResult)(nil),            // 11: akira.connection.v1.TaskResult
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
+	(*EditFileRequest)(nil),       // 11: akira.connection.v1.EditFileRequest
+	(*GlobRequest)(nil),           // 12: akira.connection.v1.GlobRequest
+	(*ListRequest)(nil),           // 13: akira.connection.v1.ListRequest
+	(*TaskResult)(nil),            // 14: akira.connection.v1.TaskResult
+	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
 }
 var file_connection_v1_connection_proto_depIdxs = []int32{
 	4,  // 0: akira.connection.v1.ServerMessage.register_ack:type_name -> akira.connection.v1.RegisterResponse
@@ -922,19 +1215,22 @@ var file_connection_v1_connection_proto_depIdxs = []int32{
 	8,  // 2: akira.connection.v1.Task.exec:type_name -> akira.connection.v1.ExecTask
 	9,  // 3: akira.connection.v1.Task.read_file:type_name -> akira.connection.v1.ReadFileRequest
 	10, // 4: akira.connection.v1.Task.write_file:type_name -> akira.connection.v1.WriteFileRequest
-	12, // 5: akira.connection.v1.Task.created_at:type_name -> google.protobuf.Timestamp
-	0,  // 6: akira.connection.v1.TaskResult.status:type_name -> akira.connection.v1.TaskResult.Status
-	3,  // 7: akira.connection.v1.ConnectionService.Connect:input_type -> akira.connection.v1.RegisterRequest
-	11, // 8: akira.connection.v1.ConnectionService.SubmitResult:input_type -> akira.connection.v1.TaskResult
-	5,  // 9: akira.connection.v1.ConnectionService.Heartbeat:input_type -> akira.connection.v1.Ping
-	1,  // 10: akira.connection.v1.ConnectionService.Connect:output_type -> akira.connection.v1.ServerMessage
-	2,  // 11: akira.connection.v1.ConnectionService.SubmitResult:output_type -> akira.connection.v1.SubmitResultResponse
-	6,  // 12: akira.connection.v1.ConnectionService.Heartbeat:output_type -> akira.connection.v1.Pong
-	10, // [10:13] is the sub-list for method output_type
-	7,  // [7:10] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	11, // 5: akira.connection.v1.Task.edit_file:type_name -> akira.connection.v1.EditFileRequest
+	12, // 6: akira.connection.v1.Task.glob:type_name -> akira.connection.v1.GlobRequest
+	13, // 7: akira.connection.v1.Task.list:type_name -> akira.connection.v1.ListRequest
+	15, // 8: akira.connection.v1.Task.created_at:type_name -> google.protobuf.Timestamp
+	0,  // 9: akira.connection.v1.TaskResult.status:type_name -> akira.connection.v1.TaskResult.Status
+	3,  // 10: akira.connection.v1.ConnectionService.Connect:input_type -> akira.connection.v1.RegisterRequest
+	14, // 11: akira.connection.v1.ConnectionService.SubmitResult:input_type -> akira.connection.v1.TaskResult
+	5,  // 12: akira.connection.v1.ConnectionService.Heartbeat:input_type -> akira.connection.v1.Ping
+	1,  // 13: akira.connection.v1.ConnectionService.Connect:output_type -> akira.connection.v1.ServerMessage
+	2,  // 14: akira.connection.v1.ConnectionService.SubmitResult:output_type -> akira.connection.v1.SubmitResultResponse
+	6,  // 15: akira.connection.v1.ConnectionService.Heartbeat:output_type -> akira.connection.v1.Pong
+	13, // [13:16] is the sub-list for method output_type
+	10, // [10:13] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_connection_v1_connection_proto_init() }
@@ -950,6 +1246,9 @@ func file_connection_v1_connection_proto_init() {
 		(*Task_Exec)(nil),
 		(*Task_ReadFile)(nil),
 		(*Task_WriteFile)(nil),
+		(*Task_EditFile)(nil),
+		(*Task_Glob)(nil),
+		(*Task_List)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -957,7 +1256,7 @@ func file_connection_v1_connection_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_connection_v1_connection_proto_rawDesc), len(file_connection_v1_connection_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

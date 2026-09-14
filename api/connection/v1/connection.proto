@@ -75,6 +75,9 @@ message Task {
     ExecTask exec = 2;
     ReadFileRequest read_file = 3;
     WriteFileRequest write_file = 4;
+    EditFileRequest edit_file = 7;
+    GlobRequest glob = 8;
+    ListRequest list = 9;
   }
   google.protobuf.Timestamp created_at = 5;
   // timeout_ms — лимит исполнения; 0 означает без таймаута.
@@ -86,11 +89,17 @@ message ExecTask {
   string cmd = 1;
 }
 
-// ReadFileRequest — прочитать файл и вернуть содержимое.
+// ReadFileRequest — прочитать окно строк файла и вернуть содержимое.
 message ReadFileRequest {
   string path = 1;
-  // max_bytes — ограничение размера ответа; 0 = без ограничения.
+  // max_bytes — ограничение размера ответа (применяется к окну);
+  // 0 = без ограничения.
   int64 max_bytes = 2;
+  // offset — номер первой строки окна (1-based); 0 или 1 — с начала.
+  int64 offset = 3;
+  // limit — сколько строк вернуть; 0 = без ограничения строк
+  // (объём ответа всё равно ограничен max_bytes).
+  int64 limit = 4;
 }
 
 // WriteFileRequest — записать файл.
@@ -98,6 +107,32 @@ message WriteFileRequest {
   string path = 1;
   bytes content = 2;
   bool create_dirs = 3;
+}
+
+// EditFileRequest — заменить вхождения old_str на new_str.
+// При replace_all = false строка old_str обязана встречаться
+// в файле ровно один раз, иначе задача завершается STATUS_ERROR.
+message EditFileRequest {
+  string path = 1;
+  string old_str = 2;
+  string new_str = 3;
+  bool replace_all = 4;
+}
+
+// GlobRequest — поиск файлов по шаблону (**, *, ?, [class])
+// в каталоге path и ниже.
+message GlobRequest {
+  // path — базовый каталог поиска (абсолютный путь).
+  string path = 1;
+  // pattern — шаблон относительно path, например "**/*.go".
+  string pattern = 2;
+}
+
+// ListRequest — листинг каталога path до глубины depth.
+message ListRequest {
+  string path = 1;
+  // depth — глубина обхода: 1 = только непосредственные дети.
+  int32 depth = 2;
 }
 
 // TaskResult — результат исполнения команды.
@@ -119,6 +154,12 @@ message TaskResult {
   // сверяет его с владельцем ожидающей задачи; пустое значение
   // принимается (совместимость со старыми клиентами).
   string client_id = 8;
+  // total_lines — read_file: всего строк в файле; glob/list: всего
+  // записей до ограничения. 0 = не известно.
+  int64 total_lines = 9;
+  // truncated — ответ обрезан ограничением (max_bytes для read,
+  // лимит записей для glob/list).
+  bool truncated = 10;
 
   enum Status {
     STATUS_UNSPECIFIED = 0;

@@ -175,24 +175,25 @@ func (e *e2eEnv) callTool(t *testing.T, name string, args map[string]any) map[st
 	})
 }
 
-// TestE2EReadWriteExec — полный цикл через MCP: write_file →
-// resources/read → exec cat. Файлы пишет настоящий executor
+// TestE2ETools — полный цикл всех инструментов через MCP: write →
+// read (окно строк) → edit (одиночная замена, неоднозначная, replace_all)
+// → glob → list → exec cat. Файлы пишет настоящий executor
 // на локальной машине.
-func TestE2EReadWriteExec(t *testing.T) {
+func TestE2ETools(t *testing.T) {
 	e := newE2EEnv(t)
 
 	dir := t.TempDir()
-	path := filepath.Join(dir, "hello.txt")
-	const content = "hello from e2e"
+	path := filepath.Join(dir, "sub", "hello.txt")
+	const content = "line one\nline two\nline three\nline four\nline five\n"
 
-	// 1. write_file через MCP.
-	body := e.callTool(t, "write_file", map[string]any{
-		"client_id": e.client,
-		"path":      path,
-		"content":   content,
+	// 1. write во вложенный путь: родительские каталоги создаются сами.
+	body := e.callTool(t, "write", map[string]any{
+		"host":    e.client,
+		"path":    path,
+		"content": content,
 	})
 	if isToolError(t, body) {
-		t.Fatalf("write_file failed: %v", body)
+		t.Fatalf("write failed: %v", body)
 	}
 
 	// Файл действительно на диске (писал настоящий executor).
@@ -204,24 +205,118 @@ func TestE2EReadWriteExec(t *testing.T) {
 		t.Fatalf("disk content = %q, want %q", disk, content)
 	}
 
-	// 2. resources/read того же файла через URI-шаблон.
-	uri := "akira://file/" + e.client + "/" + path
-	res := e.callRPC(t, "resources/read", map[string]any{"uri": uri})
-	if got := resourceText(t, res); got != content {
-		t.Fatalf("resource text = %q, want %q", got, content)
+	// 2. read целиком — нумерация строк в стиле cat -n.
+	body = e.callTool(t, "read", map[string]any{
+		"host": e.client,
+		"path": path,
+	})
+	if isToolError(t, body) {
+		t.Fatalf("read failed: %v", body)
+	}
+	if text := toolResultText(t, body); !strings.Contains(text, "  1\tline one") {
+		t.Fatalf("read output = %q, want cat -n numbering", text)
 	}
 
-	// 3. exec cat файла.
+	// 3. read окно строк 2–3.
+	body = e.callTool(t, "read", map[string]any{
+		"host":   e.client,
+		"path":   path,
+		"offset": 2,
+		"limit":  2,
+	})
+	if isToolError(t, body) {
+		t.Fatalf("read window failed: %v", body)
+	}
+	if text, want := toolResultText(t, body), "  2\tline two\n  3\tline three\n[2-3 of 5 lines]\n"; text != want {
+		t.Fatalf("read window = %q, want %q", text, want)
+	}
+
+	// 4. read с offset за концом файла — ошибка.
+	body = e.callTool(t, "read", map[string]any{
+		"host":   e.client,
+		"path":   path,
+		"offset": 99,
+	})
+	if !isToolError(t, body) {
+		t.Fatalf("read beyond EOF must fail, got %v", body)
+	}
+
+	// 5. edit уникальной строки.
+	body = e.callTool(t, "edit", map[string]any{
+		"host":    e.client,
+		"path":    path,
+		"old_str": "line three",
+		"new_str": "LINE THREE",
+	})
+	if isToolError(t, body) {
+		t.Fatalf("edit failed: %v", body)
+	}
+	disk, _ = os.ReadFile(path)
+	if !strings.Contains(string(disk), "LINE THREE") {
+		t.Fatalf("disk content after edit = %q, missing LINE THREE", disk)
+	}
+
+	// 6. edit строки, встречающейся дважды: без replace_all — ошибка,
+	// с replace_all — заменяются обе.
+	body = e.callTool(t, "edit", map[string]any{
+		"host":    e.client,
+		"path":    path,
+		"old_str": "line f",
+		"new_str": "LINE F",
+	})
+	if !isToolError(t, body) {
+		t.Fatalf("ambiguous edit must fail, got %v", body)
+	}
+	body = e.callTool(t, "edit", map[string]any{
+		"host":        e.client,
+		"path":        path,
+		"old_str":     "line f",
+		"new_str":     "LINE F",
+		"replace_all": true,
+	})
+	if isToolError(t, body) {
+		t.Fatalf("edit replace_all failed: %v", body)
+	}
+	disk, _ = os.ReadFile(path)
+	if n := strings.Count(string(disk), "LINE F"); n != 2 {
+		t.Fatalf("after replace_all: %d occurrences of LINE F, want 2 (content %q)", n, disk)
+	}
+
+	// 7. glob по **/*.txt от dir.
+	body = e.callTool(t, "glob", map[string]any{
+		"host":    e.client,
+		"pattern": "**/*.txt",
+		"path":    dir,
+	})
+	if isToolError(t, body) {
+		t.Fatalf("glob failed: %v", body)
+	}
+	if text := toolResultText(t, body); !strings.Contains(text, path) {
+		t.Fatalf("glob output = %q, want it to contain %q", text, path)
+	}
+
+	// 8. list dir на глубину 1: подкаталог sub/ с суффиксом '/'.
+	body = e.callTool(t, "list", map[string]any{
+		"host": e.client,
+		"path": dir,
+	})
+	if isToolError(t, body) {
+		t.Fatalf("list failed: %v", body)
+	}
+	if text := toolResultText(t, body); !strings.Contains(text, "sub/") {
+		t.Fatalf("list output = %q, want it to contain sub/", text)
+	}
+
+	// 9. exec cat файла.
 	body = e.callTool(t, "exec", map[string]any{
-		"client_id": e.client,
-		"cmd":       "cat " + path,
+		"host": e.client,
+		"cmd":  "cat " + path,
 	})
 	if isToolError(t, body) {
 		t.Fatalf("exec failed: %v", body)
 	}
-	text := toolResultText(t, body)
-	if !strings.Contains(text, content) {
-		t.Fatalf("exec output = %q, want it to contain %q", text, content)
+	if text := toolResultText(t, body); !strings.Contains(text, "LINE THREE") {
+		t.Fatalf("exec output = %q, want it to contain LINE THREE", text)
 	}
 }
 

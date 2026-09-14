@@ -25,13 +25,18 @@ func runTask(pool *connectionpool.ConnectionPool, cmd, clientID string, args []s
 		}
 	case "read":
 		if len(args) < 1 {
-			fmt.Println("usage: read <path>")
+			fmt.Println("usage: read <path> [offset] [limit]")
 			return
 		}
+		req := &pb.ReadFileRequest{Path: args[0]}
+		if len(args) > 1 {
+			fmt.Sscanf(args[1], "%d", &req.Offset)
+		}
+		if len(args) > 2 {
+			fmt.Sscanf(args[2], "%d", &req.Limit)
+		}
 		task = &pb.Task{
-			Payload: &pb.Task_ReadFile{ReadFile: &pb.ReadFileRequest{
-				Path: args[0],
-			}},
+			Payload: &pb.Task_ReadFile{ReadFile: req},
 		}
 	case "write":
 		if len(args) < 2 {
@@ -40,8 +45,48 @@ func runTask(pool *connectionpool.ConnectionPool, cmd, clientID string, args []s
 		}
 		task = &pb.Task{
 			Payload: &pb.Task_WriteFile{WriteFile: &pb.WriteFileRequest{
+				Path:       args[0],
+				Content:    []byte(strings.Join(args[1:], " ")),
+				CreateDirs: true,
+			}},
+		}
+	case "edit":
+		if len(args) < 3 {
+			fmt.Println("usage: edit <path> <old_str> <new_str> [all]")
+			return
+		}
+		task = &pb.Task{
+			Payload: &pb.Task_EditFile{EditFile: &pb.EditFileRequest{
+				Path:       args[0],
+				OldStr:     args[1],
+				NewStr:     args[2],
+				ReplaceAll: len(args) > 3 && args[3] == "all",
+			}},
+		}
+	case "glob":
+		if len(args) < 2 {
+			fmt.Println("usage: glob <path> <pattern>")
+			return
+		}
+		task = &pb.Task{
+			Payload: &pb.Task_Glob{Glob: &pb.GlobRequest{
 				Path:    args[0],
-				Content: []byte(strings.Join(args[1:], " ")),
+				Pattern: args[1],
+			}},
+		}
+	case "list":
+		if len(args) < 1 {
+			fmt.Println("usage: list <path> [depth]")
+			return
+		}
+		depth := int32(1)
+		if len(args) > 1 {
+			fmt.Sscanf(args[1], "%d", &depth)
+		}
+		task = &pb.Task{
+			Payload: &pb.Task_List{List: &pb.ListRequest{
+				Path:  args[0],
+				Depth: depth,
 			}},
 		}
 	}
@@ -65,9 +110,15 @@ func taskDesc(t *pb.Task) string {
 	case *pb.Task_Exec:
 		return "exec: " + p.Exec.Cmd
 	case *pb.Task_ReadFile:
-		return "read: " + p.ReadFile.Path
+		return fmt.Sprintf("read: %s (offset=%d limit=%d)", p.ReadFile.Path, p.ReadFile.Offset, p.ReadFile.Limit)
 	case *pb.Task_WriteFile:
 		return "write: " + p.WriteFile.Path
+	case *pb.Task_EditFile:
+		return "edit: " + p.EditFile.Path
+	case *pb.Task_Glob:
+		return "glob: " + p.Glob.Pattern
+	case *pb.Task_List:
+		return fmt.Sprintf("list: %s (depth=%d)", p.List.Path, p.List.Depth)
 	}
 	return "?"
 }

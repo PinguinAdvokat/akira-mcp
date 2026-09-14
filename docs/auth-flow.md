@@ -382,7 +382,7 @@ sequenceDiagram
     DB-->>S: user_id, verified
     S->>S: pool.Register (connection_id = user_id + ":" + client_id)
     S-->>C: RegisterResponse (session_id, heartbeat_interval_ms=30000, connection_id)
-    Note over S,C: server→client stream stays open; the server pushes Task messages (exec, read_file, write_file)
+    Note over S,C: server→client stream stays open; the server pushes Task messages (exec, read_file, write_file, edit_file, glob, list)
     C->>S: SubmitResult (task_id, client_id = connection_id)
     C->>S: Heartbeat every 30 s
 ```
