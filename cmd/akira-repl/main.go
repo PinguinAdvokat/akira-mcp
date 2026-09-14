@@ -23,8 +23,11 @@ import (
 //	list                       — активные подключения (connection_id)
 //	use <connection-id>        — выбрать активное подключение
 //	exec <conn> <cmd...>       — выполнить команду на клиенте
-//	read <conn> <path>         — прочитать файл
+//	read <conn> <path> [offset] [limit] — прочитать окно строк файла
 //	write <conn> <path> <text...> — записать текст в файл
+//	edit <conn> <path> <old_str> <new_str> [all] — заменить строку в файле
+//	glob <conn> <path> <pattern> — найти файлы по шаблону
+//	list <conn> <path> [depth] — листинг каталога
 //	timeout <ms>               — таймаут задач для последующих команд
 //	help                       — список команд
 //	quit                       — выход

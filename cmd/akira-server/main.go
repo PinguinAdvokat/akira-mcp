@@ -151,8 +151,8 @@ func main() {
 	grpcServer := connectionserver.NewGRPCServer(pool, storeLookup{store: store})
 
 	// MCP-сервер — второй листенер того же процесса: LLM через него
-	// управляет машинами пользователей (tools exec/write_file,
-	// ресурсы akira://machines и akira://file/...). Авторизация —
+	// управляет машинами пользователей (tools exec/read/edit/write/
+	// glob/list, ресурс akira://machines). Авторизация —
 	// access-токены auth-сервиса, проверяемые по его JWKS; OAuth-флоу
 	// начинается с 401 + resource_metadata (RFC 9728), поэтому нужны
 	// публичные адреса MCP-листенера и auth-сервиса.
