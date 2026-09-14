@@ -106,7 +106,7 @@ func addTools(s *mcpServer, cfg Config) {
 
 	s.AddTool(mcp.NewTool("glob",
 		mcp.WithDescription("Find files on the user's machine identified by host by glob pattern "+
-			"(supports **, *, ?, [class]) and return the matching absolute paths."),
+			"(supports **, *, ?, [class] and {a,b} brace expansion) and return the matching absolute paths."),
 		hostArg(),
 		mcp.WithString("pattern",
 			mcp.Required(),

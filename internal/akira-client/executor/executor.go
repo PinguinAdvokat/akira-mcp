@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,13 @@ const (
 	maxGlobResults = 1000
 	maxListEntries = 1000
 )
+
+// maxGlobPatterns ограничивает число шаблонов после разворота фигурных
+// скобок, чтобы вложенные группы вида {a,b}{a,b}{a,b}… не разрослись
+// до астрономического количества вариантов.
+const maxGlobPatterns = 1000
+
+var errTooManyGlobPatterns = fmt.Errorf("glob pattern expands to more than %d variants", maxGlobPatterns)
 
 // Execute исполняет задачу и возвращает TaskResult с task_id и duration.
 // Исполнение не зависит от соединения с сервером: ctx привязан только
@@ -194,14 +202,19 @@ func editTask(ctx context.Context, t *pb.EditFileRequest) *pb.TaskResult {
 }
 
 // globTask ищет файлы по шаблону pattern относительно каталога path.
-// stdout — абсолютные пути совпадений через '\n', отсортированные
+// Шаблон сначала проходит brace expansion ("*.{go,md}" → "*.go",
+// "*.md") — сопоставляется любое из полученных выражений. stdout —
+// абсолютные пути совпадений через '\n', отсортированные
 // (WalkDir обходит лексикографически); total_lines — всего совпадений
 // до ограничения, truncated — ответ обрезан лимитом.
 func globTask(ctx context.Context, t *pb.GlobRequest) *pb.TaskResult {
-	pattern := strings.TrimPrefix(strings.TrimPrefix(t.Pattern, "/"), "./")
+	patterns, err := expandBraces(strings.TrimPrefix(strings.TrimPrefix(t.Pattern, "/"), "./"))
+	if err != nil {
+		return errResult(err)
+	}
 	var matches []string
 	total := 0
-	err := filepath.WalkDir(t.Path, func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(t.Path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err // несуществующий базовый каталог — ошибка задачи
 		}
@@ -209,7 +222,7 @@ func globTask(ctx context.Context, t *pb.GlobRequest) *pb.TaskResult {
 		if relErr != nil || rel == "." {
 			return nil
 		}
-		if matchGlob(pattern, filepath.ToSlash(rel)) {
+		if matchAnyGlob(patterns, filepath.ToSlash(rel)) {
 			total++
 			if len(matches) < maxGlobResults {
 				matches = append(matches, p)
@@ -269,13 +282,163 @@ func listTask(ctx context.Context, t *pb.ListRequest) *pb.TaskResult {
 	}
 }
 
+// matchAnyGlob проверяет rel против любого из шаблонов — после
+// разворота фигурных скобок их может быть несколько.
+func matchAnyGlob(patterns []string, rel string) bool {
+	for _, p := range patterns {
+		if matchGlob(p, rel) {
+			return true
+		}
+	}
+	return false
+}
+
 // matchGlob сопоставляет относительный путь со шаблоном по сегментам
 // через '/'. "**" соответствует любому числу сегментов (включая ноль),
 // остальные сегменты сверяются path.Match по одному сегменту (поэтому
-// '*' не пересекает '/'). Замечание: литеральный '\' в POSIX-имени
+// '*' не пересекает '/'). Фигурные скобки разворачиваются раньше,
+// на уровне globTask. Замечание: литеральный '\' в POSIX-имени
 // файла требует экранирования в шаблоне.
 func matchGlob(pattern, rel string) bool {
 	return matchSegments(strings.Split(pattern, "/"), strings.Split(rel, "/"))
+}
+
+// expandBraces разворачивает bash-подобные фигурные скобки в шаблоне:
+// альтернативы через запятую ("*.{go,md}" → "*.go", "*.md"), диапазоны
+// ("{1..3}", "{a..z}", включая убывающие) и вложенность
+// ("a{b,{c,d}}e" → "abe", "ace", "ade"). Семантика как в bash:
+// группа без запятой и без диапазона ("a{b}c"), как и непарная '{',
+// остаётся литералом, но её содержимое сканируется дальше
+// ("{a{b,c}}" → "{ab}", "{ac}"); '\{' экранируется. Возвращает
+// errTooManyGlobPatterns, если вариантов больше maxGlobPatterns.
+func expandBraces(pattern string) ([]string, error) {
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++ // экранированный символ пропускаем вместе с ним
+		case '{':
+			end := closingBrace(pattern, i)
+			if end < 0 {
+				continue // непарная '{' — литерал; ищем следующую группу после неё
+			}
+			alts, err := braceAlts(pattern[i+1 : end])
+			if err != nil {
+				return nil, err
+			}
+			if alts == nil {
+				continue // не разворачивается — литеральная группа; внутри может быть разворачиваемая
+			}
+			var out []string
+			for _, alt := range alts {
+				// хвост с оставшимися группами приписываем к каждой альтернативе
+				// и разворачиваем рекурсивно
+				tails, err := expandBraces(alt + pattern[end+1:])
+				if err != nil {
+					return nil, err
+				}
+				for _, tail := range tails {
+					out = append(out, pattern[:i]+tail)
+				}
+			}
+			if len(out) > maxGlobPatterns {
+				return nil, errTooManyGlobPatterns
+			}
+			return out, nil
+		}
+	}
+	return []string{pattern}, nil
+}
+
+// closingBrace возвращает индекс парной '}' для pattern[open] == '{'
+// с учётом вложенности и экранирования, либо -1.
+func closingBrace(pattern string, open int) int {
+	depth := 0
+	for i := open; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// braceAlts возвращает альтернативы содержимого группы — разбиение по
+// запятым верхнего уровня ('\,' не считается) — либо элементы
+// диапазона {lo..hi}. nil — группа не разворачивается (без запятой и
+// не диапазон); диапазон шире maxGlobPatterns — errTooManyGlobPatterns.
+func braceAlts(inner string) ([]string, error) {
+	var alts []string
+	depth, last := 0, 0
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '\\':
+			i++
+		case '{':
+			depth++
+		case '}':
+			depth--
+		case ',':
+			if depth == 0 {
+				alts = append(alts, inner[last:i])
+				last = i + 1
+			}
+		}
+	}
+	alts = append(alts, inner[last:])
+	if len(alts) > 1 {
+		return alts, nil
+	}
+	return braceRange(inner)
+}
+
+// braceRange разворачивает диапазон {lo..hi}: посимвольный ("a..z")
+// или числовой ("1..5", допускаются отрицательные), убывающий —
+// в обратном порядке. nil — содержимое не является диапазоном.
+func braceRange(inner string) ([]string, error) {
+	lo, hi, ok := strings.Cut(inner, "..")
+	if !ok {
+		return nil, nil
+	}
+	var from, to int
+	switch {
+	case len(lo) == 1 && len(hi) == 1:
+		from, to = int(lo[0]), int(hi[0])
+	default:
+		nlo, errLo := strconv.Atoi(lo)
+		nhi, errHi := strconv.Atoi(hi)
+		if errLo != nil || errHi != nil {
+			return nil, nil
+		}
+		from, to = nlo, nhi
+	}
+	asc := from <= to
+	if !asc {
+		from, to = to, from
+	}
+	if to-from+1 > maxGlobPatterns {
+		return nil, errTooManyGlobPatterns
+	}
+	alts := make([]string, 0, to-from+1)
+	for n := from; n <= to; n++ {
+		if len(lo) == 1 && len(hi) == 1 {
+			alts = append(alts, string(rune(n)))
+		} else {
+			alts = append(alts, strconv.Itoa(n))
+		}
+	}
+	if !asc {
+		for i, j := 0, len(alts)-1; i < j; i, j = i+1, j-1 {
+			alts[i], alts[j] = alts[j], alts[i]
+		}
+	}
+	return alts, nil
 }
 
 // matchSegments рекурсивно сопоставляет сегменты шаблона и пути.

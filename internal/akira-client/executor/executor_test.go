@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -248,6 +249,72 @@ func TestMatchGlob(t *testing.T) {
 	}
 }
 
+func TestExpandBraces(t *testing.T) {
+	tests := []struct {
+		pattern string
+		want    []string
+	}{
+		{"*.{py,toml,md}", []string{"*.py", "*.toml", "*.md"}},
+		{"a{b,{c,d}}e", []string{"abe", "ace", "ade"}}, // вложенность
+		{"{a,b}{1..2}", []string{"a1", "a2", "b1", "b2"}},
+		{"pre{1..3}post", []string{"pre1post", "pre2post", "pre3post"}},
+		{"{c..a}", []string{"c", "b", "a"}}, // убывающий диапазон
+		{"{a..c}", []string{"a", "b", "c"}},
+		{"{10..12}", []string{"10", "11", "12"}},
+		{"src/{a,b}/**/*.{go,md}", []string{"src/a/**/*.go", "src/a/**/*.md", "src/b/**/*.go", "src/b/**/*.md"}},
+		{"a{b}c", []string{"a{b}c"}},           // без запятой — литерал
+		{"{a{b,c}}", []string{"{ab}", "{ac}"}}, // …но внутри сканируем дальше, как bash
+		{"a{x,y", []string{"a{x,y"}},           // непарная '{' — литерал
+		{`a\{b,c\}d`, []string{`a\{b,c\}d`}},   // экранированные скобки — литерал
+		{"{,a}", []string{"", "a"}},            // пустая альтернатива
+		{"no braces", []string{"no braces"}},
+	}
+	for _, tt := range tests {
+		got, err := expandBraces(tt.pattern)
+		if err != nil {
+			t.Errorf("expandBraces(%q) error: %v", tt.pattern, err)
+			continue
+		}
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("expandBraces(%q) = %q, want %q", tt.pattern, got, tt.want)
+		}
+	}
+
+	if _, err := expandBraces(strings.Repeat("{a,b}", 11)); err == nil { // 2^11 > maxGlobPatterns
+		t.Error("no error for a pattern expanding over the limit")
+	}
+	if _, err := expandBraces("{1.." + itoa(maxGlobPatterns+1) + "}"); err == nil {
+		t.Error("no error for an over-wide range")
+	}
+}
+
+func TestGlobBraces(t *testing.T) {
+	tests := []struct {
+		pattern string
+		rel     string
+		want    bool
+	}{
+		{"*.{py,toml,md}", "x.py", true},
+		{"*.{py,toml,md}", "x.rs", false},
+		{"**/*.{go,md}", "a/b/c.md", true},
+		{"{a,b}/*.txt", "b/x.txt", true},
+		{"{a,b}/*.txt", "c/x.txt", false},
+		{"a{b}c", "abc", false},      // литеральная группа
+		{"a{b}c", "a{b}c", true},     // …матчится буквально
+		{`a\{b,c\}`, "a{b,c}", true}, // экранированные скобки
+	}
+	for _, tt := range tests {
+		patterns, err := expandBraces(tt.pattern)
+		if err != nil {
+			t.Errorf("expandBraces(%q) error: %v", tt.pattern, err)
+			continue
+		}
+		if got := matchAnyGlob(patterns, tt.rel); got != tt.want {
+			t.Errorf("glob %q vs %q = %v, want %v", tt.pattern, tt.rel, got, tt.want)
+		}
+	}
+}
+
 func TestGlobTask(t *testing.T) {
 	dir := t.TempDir()
 	for _, p := range []string{"x.go", "a/b/c.go", "a/d.txt", "a/e/f.go"} {
@@ -278,6 +345,25 @@ func TestGlobTask(t *testing.T) {
 	if res.TotalLines != 3 || res.Truncated {
 		t.Errorf("total = %d, truncated = %v; want 3, false", res.TotalLines, res.Truncated)
 	}
+
+	t.Run("braces", func(t *testing.T) {
+		res := Execute(&pb.Task{Payload: &pb.Task_Glob{Glob: &pb.GlobRequest{Path: dir, Pattern: "**/*.{go,txt}"}}})
+		if res.Status != pb.TaskResult_STATUS_OK {
+			t.Fatalf("status = %s, error = %q", res.Status, res.Error)
+		}
+		want := []string{
+			filepath.Join(dir, "a", "b", "c.go"),
+			filepath.Join(dir, "a", "d.txt"),
+			filepath.Join(dir, "a", "e", "f.go"),
+			filepath.Join(dir, "x.go"),
+		}
+		if got := strings.Split(string(res.Stdout), "\n"); !slices.Equal(got, want) {
+			t.Errorf("matches = %q, want %q", got, want)
+		}
+		if res.TotalLines != 4 || res.Truncated {
+			t.Errorf("total = %d, truncated = %v; want 4, false", res.TotalLines, res.Truncated)
+		}
+	})
 
 	t.Run("missing_base", func(t *testing.T) {
 		res := Execute(&pb.Task{Payload: &pb.Task_Glob{Glob: &pb.GlobRequest{Path: filepath.Join(dir, "nope"), Pattern: "**"}}})
