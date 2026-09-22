@@ -254,13 +254,32 @@ func TestMCPToolsList(t *testing.T) {
 		t.Fatalf("tools/list: status %d, body %v", code, body)
 	}
 	names := toolNames(body)
-	for _, want := range []string{"exec", "read", "edit", "write", "glob", "list"} {
+	for _, want := range []string{"machines", "exec", "read", "edit", "write", "glob", "list"} {
 		if !names[want] {
 			t.Errorf("tools/list: want %q, got %v", want, names)
 		}
 	}
-	if len(names) != 6 {
-		t.Errorf("tools/list: want exactly 6 tools, got %d (%v)", len(names), names)
+	if len(names) != 7 {
+		t.Errorf("tools/list: want exactly 7 tools, got %d (%v)", len(names), names)
+	}
+}
+
+func TestMCPMachinesTool(t *testing.T) {
+	e := newTestEnv(t, "user1", "laptop1", "host1", "linux")
+	proto := e.initMCP(t)
+
+	code, body := e.rpc(t, e.token, proto, "tools/call", map[string]any{
+		"name":      "machines",
+		"arguments": map[string]any{},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("tools/call: status %d, body %v", code, body)
+	}
+	text := toolResultText(t, body)
+	for _, want := range []string{"client_id", "laptop1", "hostname", "host1", "platform", "linux"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("machines result text = %q, want it to contain %q", text, want)
+		}
 	}
 }
 
