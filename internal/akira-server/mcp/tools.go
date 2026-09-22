@@ -2,6 +2,7 @@ package akiramcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -30,15 +31,22 @@ const maxListDepth = 32
 func hostArg() mcp.ToolOption {
 	return mcp.WithString("host",
 		mcp.Required(),
-		mcp.Description("Machine to run on (client_id from the akira://machines resource)"),
+		mcp.Description("Machine to run on (client_id from the machines tool or the akira://machines resource)"),
 	)
 }
 
-// addTools регистрирует инструменты exec, read, edit, write, glob и list.
+// addTools регистрирует инструменты machines, exec, read, edit, write,
+// glob и list.
 func addTools(s *mcpServer, cfg Config) {
+	s.AddTool(mcp.NewTool("machines",
+		mcp.WithDescription("List the user's machines currently connected to this server "+
+			"(client_id, hostname, platform). Pass the client_id value as the host argument of the other tools."),
+		mcp.WithReadOnlyHintAnnotation(true),
+	), machinesTool(cfg))
+
 	s.AddTool(mcp.NewTool("exec",
 		mcp.WithDescription("Execute a shell command on the user's machine identified by host "+
-			"(see the akira://machines resource for connected machines) and return stdout, stderr and exit code."),
+			"(see the machines tool for connected machines) and return stdout, stderr and exit code."),
 		hostArg(),
 		mcp.WithString("cmd",
 			mcp.Required(),
@@ -131,6 +139,32 @@ func addTools(s *mcpServer, cfg Config) {
 		),
 		mcp.WithReadOnlyHintAnnotation(true),
 	), listTool(cfg))
+}
+
+// machinesTool — обработчик инструмента machines: тот же список
+// активных машин пользователя, что и ресурс akira://machines, но
+// инструментом — часть MCP-хостов ресурсы не показывает.
+func machinesTool(cfg Config) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		type machine struct {
+			ClientID string `json:"client_id"`
+			Hostname string `json:"hostname"`
+			Platform string `json:"platform"`
+		}
+		machines := make([]machine, 0, 4)
+		for _, info := range cfg.Pool.ClientsByUser(ctxUserID(ctx)) {
+			machines = append(machines, machine{
+				ClientID: info.ClientID,
+				Hostname: info.Hostname,
+				Platform: info.Platform,
+			})
+		}
+		data, err := json.MarshalIndent(machines, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultErrorFromErr("machines failed", err), nil
+		}
+		return mcp.NewToolResultText(string(data)), nil
+	}
 }
 
 // execTool — обработчик инструмента exec: задача ExecTask на машину
