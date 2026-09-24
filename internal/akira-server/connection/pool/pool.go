@@ -52,16 +52,33 @@ func New(maxConnections int) *ConnectionPool {
 
 // Register добавляет новое подключение в пул под connection_id
 // ({user_id}:{client_id}) и запоминает его метаданные info.
-// Возвращает ErrAlreadyRegistered, если подключение с таким
-// connection_id уже активно, и ErrTooManyConnections, если пользователь
-// превысил лимит одновременных подключений.
+// Если под этим connection_id уже числится другое подключение
+// (клиент переподключился, пока старый поток ещё не замечен мёртвым),
+// оно заменяется новым: старое закрывается (писатель старого потока
+// завершается по Done()), а ожидание его неотправленных задач
+// завершается ошибкой ErrConnectionClosed — клиент их не получал.
+// Задачи, уже ушедшие в старый поток, продолжают ждать: клиент
+// вернулся и может доставить их результаты из локального накопителя.
+// Заменяемая регистрация не учитывается в лимите пользователя —
+// переподключение не должно блокироваться собственным «призрачным»
+// местом. Возвращает ErrTooManyConnections, если пользователь превысил
+// лимит одновременных подключений.
 func (p *ConnectionPool) Register(connectionID, userID string, info ClientInfo) (*client.ClientConnection, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if _, ok := p.conns[connectionID]; ok {
-		return nil, connection.ErrAlreadyRegistered
+	old := p.conns[connectionID]
+	var oldInfo ClientInfo
+	if old != nil {
+		oldInfo = p.infos[connectionID]
+		delete(p.conns, connectionID)
+		delete(p.infos, connectionID)
 	}
+	// Лимит проверяется после снятия заменяемой регистрации.
 	if p.maxConnections > 0 && p.countByUser(userID) >= p.maxConnections {
+		if old != nil {
+			p.conns[connectionID] = old
+			p.infos[connectionID] = oldInfo
+		}
+		p.mu.Unlock()
 		return nil, connection.ErrTooManyConnections
 	}
 	c := client.New(connectionID)
@@ -69,6 +86,10 @@ func (p *ConnectionPool) Register(connectionID, userID string, info ClientInfo) 
 	info.ConnectionID = connectionID
 	info.ClientID = strings.TrimPrefix(connectionID, userID+":")
 	p.infos[connectionID] = info
+	p.mu.Unlock()
+	if old != nil {
+		p.failUnsent(old.Close())
+	}
 	return c, nil
 }
 
@@ -90,10 +111,11 @@ func (p *ConnectionPool) countByUser(userID string) int {
 // ErrConnectionClosed ожидание всех задач подключения — результата
 // по ним можно не ждать, даже если клиент переподключится:
 // переподключение не пересылает уже отправленные задачи заново.
-// Если в пуле уже другое, более новое подключение (гонка
-// переподключения) — только завершает задачи, сообщения о которых
-// не ушли из очереди старого подключения: клиент на связи, и
-// отправленные ему задачи могут ещё доставить результат.
+// Если в пуле уже другое подключение — более новое (гонка
+// переподключения) или заменившее это (см. Register) — только
+// завершаются задачи, сообщения о которых не ушли из очереди
+// старого подключения: клиент на связи, и отправленные ему задачи
+// могут ещё доставить результат.
 func (p *ConnectionPool) Unregister(conn *client.ClientConnection) {
 	p.mu.Lock()
 	cur, ok := p.conns[conn.ClientID]

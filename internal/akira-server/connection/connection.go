@@ -7,8 +7,6 @@ import (
 )
 
 var (
-	// ErrAlreadyRegistered — подключение с таким connection_id уже активно.
-	ErrAlreadyRegistered = errors.New("connectionpool: client already registered")
 	// ErrConnectionNotFound — активного подключения с таким connection_id нет.
 	ErrConnectionNotFound = errors.New("connectionpool: connection not found")
 	// ErrConnectionClosed — подключение закрыто.

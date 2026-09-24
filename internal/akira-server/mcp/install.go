@@ -64,9 +64,10 @@ chmod +x "$tmp"
 mv -f "$tmp" "$bin"
 trap - EXIT
 
-# Уже запущенный клиент с тем же client_id бесконечно ретраит
-# (connection_id занят, AlreadyExists не фатален для клиента) —
-# предлагаем остановить старый процесс.
+# Уже запущенный клиент с тем же client_id: при повторной регистрации
+# сервер заменяет старое подключение новым, поэтому два процесса будут
+# бесконечно вытеснять друг друга при переподключении — предлагаем
+# остановить старый.
 if command -v pgrep >/dev/null 2>&1 && pgrep -x akira-client >/dev/null 2>&1; then
   echo "akira-client is already running."
   answer=n

@@ -240,6 +240,138 @@ func TestHandleResultRejectsEmptyOwner(t *testing.T) {
 	}
 }
 
+// TestRegisterReplacesExisting: повторная регистрация активного
+// connection_id заменяет старое подключение (переподключение клиента
+// не блокируется), старое подключение закрывается, а его неотправленные
+// задачи завершаются ошибкой ErrConnectionClosed.
+func TestRegisterReplacesExisting(t *testing.T) {
+	pool := New(0) // без лимита подключений
+	old, err := pool.Register("u1:c1", "u1", ClientInfo{})
+	if err != nil {
+		t.Fatalf("register old: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		// Писателя нет — сообщение остаётся в очереди старого
+		// подключения и не уйдёт клиенту после замены.
+		_, err := pool.SendTask(context.Background(), "u1:c1", execTask("queued-task"))
+		done <- err
+	}()
+	time.Sleep(50 * time.Millisecond) // ждём постановки в очередь
+
+	fresh, err := pool.Register("u1:c1", "u1", ClientInfo{})
+	if err != nil {
+		t.Fatalf("re-register must replace the stale connection, got: %v", err)
+	}
+	if fresh == old {
+		t.Fatal("Register returned the same connection, want a new one")
+	}
+
+	// Старое подключение закрыто, неотправленная задача завершена.
+	select {
+	case <-old.Done():
+	case <-time.After(time.Second):
+		t.Fatal("old connection was not closed by the replacement")
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, connection.ErrConnectionClosed) {
+			t.Fatalf("queued SendTask error = %v, want ErrConnectionClosed", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued SendTask did not return after the replacement")
+	}
+
+	// В пуле — новое подключение, задачи уходят именно ему.
+	if !pool.Has("u1:c1") {
+		t.Fatal("replacement registration missing from the pool")
+	}
+	go func() { _ = <-fresh.Out() }() // писатель нового потока
+	freshRes := make(chan *pb.TaskResult, 1)
+	go func() {
+		res, err := pool.SendTask(context.Background(), "u1:c1", execTask("fresh-task"))
+		if err != nil {
+			t.Errorf("SendTask on fresh connection: %v", err)
+			return
+		}
+		freshRes <- res
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if err := pool.HandleResult(&pb.TaskResult{TaskId: "fresh-task", ClientId: "u1:c1", Status: pb.TaskResult_STATUS_OK}); err != nil {
+		t.Fatalf("fresh connection result rejected: %v", err)
+	}
+	select {
+	case <-freshRes:
+	case <-time.After(time.Second):
+		t.Fatal("fresh connection did not receive the result")
+	}
+}
+
+// TestRegisterReplaceKeepsSentTask: задача, уже ушедшая в старый поток
+// (писатель забрал сообщение из очереди), продолжает ждать результат
+// после замены подключения — клиент вернулся и доставит его из
+// накопителя через SubmitResult.
+func TestRegisterReplaceKeepsSentTask(t *testing.T) {
+	pool := New(0)
+	old, err := pool.Register("u1:c1", "u1", ClientInfo{})
+	if err != nil {
+		t.Fatalf("register old: %v", err)
+	}
+
+	resCh := make(chan *pb.TaskResult, 1)
+	go func() {
+		res, err := pool.SendTask(context.Background(), "u1:c1", execTask("sent-task"))
+		if err != nil {
+			t.Errorf("SendTask: %v", err)
+			return
+		}
+		resCh <- res
+	}()
+	// Писатель старого потока забирает сообщение — задача «ушла».
+	select {
+	case <-old.Out():
+	case <-time.After(time.Second):
+		t.Fatal("task message was not queued")
+	}
+
+	if _, err := pool.Register("u1:c1", "u1", ClientInfo{}); err != nil {
+		t.Fatalf("re-register: %v", err)
+	}
+
+	// Результат от клиента (тот же connection_id) доставляется ожиданию.
+	if err := pool.HandleResult(&pb.TaskResult{TaskId: "sent-task", ClientId: "u1:c1", Status: pb.TaskResult_STATUS_OK}); err != nil {
+		t.Fatalf("result after replacement rejected: %v", err)
+	}
+	select {
+	case res := <-resCh:
+		if res.Status != pb.TaskResult_STATUS_OK {
+			t.Fatalf("status = %v, want STATUS_OK", res.Status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("sent task wait did not survive the replacement")
+	}
+}
+
+// TestRegisterReplaceDoesNotCountTowardLimit: переподключение того же
+// клиента не блокируется лимитом — заменяемая регистрация освобождает
+// своё место.
+func TestRegisterReplaceDoesNotCountTowardLimit(t *testing.T) {
+	pool := New(1)
+
+	if _, err := pool.Register("u1:a", "u1", ClientInfo{}); err != nil {
+		t.Fatalf("register u1:a: %v", err)
+	}
+	// Переподключение того же клиента: место заменяется, а не суммируется.
+	if _, err := pool.Register("u1:a", "u1", ClientInfo{}); err != nil {
+		t.Fatalf("re-register u1:a must replace the stale connection, got: %v", err)
+	}
+	// Другой клиент того же пользователя — честное превышение лимита.
+	if _, err := pool.Register("u1:b", "u1", ClientInfo{}); !errors.Is(err, connection.ErrTooManyConnections) {
+		t.Fatalf("register u1:b error = %v, want ErrTooManyConnections", err)
+	}
+}
+
 // TestMaxConnectionsPerUser: лимит считается по пользователю
 // (префикс {user_id}: connection_id), а не глобально; после разрыва
 // подключения место освобождается.

@@ -58,9 +58,11 @@ func New(pool *connectionpool.ConnectionPool, users UserLookup) *ConnectionServe
 // NewGRPCServer создаёт gRPC-сервер akira с параметрами keepalive
 // и зарегистрированным ConnectionService. Сервер пингует долгоживущие
 // потоки Connect: «полумёртвое» (half-open) TCP-соединение закрывается
-// примерно за Time+Timeout (~80с). Без этого призрачная регистрация
-// держала бы client_id до таймаута стека TCP (~15 минут) и блокировала
-// переподключение клиента ошибкой AlreadyExists.
+// примерно за Time+Timeout (~80с) — устаревший обработчик завершается
+// и снимает свою регистрацию, не вися до таймаута TCP (~15 минут).
+// Повторная регистрация с тем же connection_id и так заменяет старую
+// (см. ConnectionPool.Register), но призрачный обработчик всё равно
+// нужно закрывать: он удерживает очередь и горутину старого потока.
 func NewGRPCServer(pool *connectionpool.ConnectionPool, users UserLookup) *grpc.Server {
 	grpcServer := grpc.NewServer(grpc.KeepaliveParams(keepalive.ServerParameters{
 		Time:    60 * time.Second,
@@ -76,6 +78,9 @@ func NewGRPCServer(pool *connectionpool.ConnectionPool, users UserLookup) *grpc.
 // connection_id формата {user_id}:{client_id}, который возвращается
 // клиенту в RegisterResponse и подписывает его TaskResult. Первое
 // сообщение потока — RegisterResponse, далее сервер присылает Task.
+// Повторная регистрация активного connection_id (клиент переподключился,
+// пока старый поток ещё числится активным) заменяет старое подключение —
+// клиент получает свежий ack, а не отказ.
 func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.ConnectionService_ConnectServer) error {
 	if reg == nil || reg.ClientId == "" || reg.ConnectKey == "" {
 		s.logger.Warn("invalid register request", "client_id", reg.GetClientId())
@@ -112,12 +117,13 @@ func (s *ConnectionServer) Connect(reg *pb.RegisterRequest, stream pb.Connection
 	})
 	if err != nil {
 		logger.Warn("register failed", "err", err)
-		switch {
-		case errors.Is(err, connection.ErrTooManyConnections):
+		if errors.Is(err, connection.ErrTooManyConnections) {
 			return status.Error(codes.ResourceExhausted, err.Error())
-		default:
-			return status.Error(codes.AlreadyExists, err.Error())
 		}
+		// Register больше ничем не может отказать (замена активной
+		// регистрации выполняется на месте), но на всякий случай —
+		// Internal, а не фатальный для клиента код.
+		return status.Error(codes.Internal, err.Error())
 	}
 	defer s.pool.Unregister(conn)
 

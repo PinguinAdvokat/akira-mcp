@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -421,6 +422,54 @@ func TestReconnectSameClientID(t *testing.T) {
 	}
 	if string(res.Stdout) != "two\n" {
 		t.Fatalf("stdout = %q, want %q", res.Stdout, "two\n")
+	}
+}
+
+// TestReconnectReplacesStaleRegistration: переподключение клиента при
+// живой (устаревшей) регистрации заменяет её — сервер отвечает свежим
+// ack, а не AlreadyExists, и не заставляет клиента ждать, пока keepalive
+// заметит мёртвый старый поток (~80с).
+func TestReconnectReplacesStaleRegistration(t *testing.T) {
+	pool, addr, connID := startServer(t)
+	userID := strings.TrimSuffix(connID, ":"+testClientID)
+
+	// «Призрачная» регистрация: клиент отвалился, сервер ещё не заметил
+	// (keepalive закрывает такой поток только за ~80с). Раньше она
+	// блокировала переподключение ошибкой AlreadyExists.
+	ghost, err := pool.Register(connID, userID, connectionpool.ClientInfo{})
+	if err != nil {
+		t.Fatalf("register ghost: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = Run(ctx, Config{
+			ServerAddr: addr,
+			ClientID:   testClientID,
+			ConnectKey: testConnectKey,
+			RetryDelay: 50 * time.Millisecond,
+		})
+	}()
+
+	// Замена призрачной регистрации происходит сразу при подключении.
+	select {
+	case <-ghost.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("stale registration was not replaced by the reconnecting client")
+	}
+
+	res, err := pool.SendTask(context.Background(), connID, &pb.Task{
+		Payload: &pb.Task_Exec{Exec: &pb.ExecTask{Cmd: "echo replaced"}},
+	})
+	if err != nil {
+		t.Fatalf("send task after replacement: %v", err)
+	}
+	if res.Status != pb.TaskResult_STATUS_OK {
+		t.Fatalf("status = %v, want STATUS_OK (error: %s, stderr: %s)", res.Status, res.Error, res.Stderr)
+	}
+	if string(res.Stdout) != "replaced\n" {
+		t.Fatalf("stdout = %q, want %q", res.Stdout, "replaced\n")
 	}
 }
 

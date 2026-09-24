@@ -403,9 +403,17 @@ Error semantics — this table is the contract the client's reconnect loop depen
 | `InvalidArgument` | missing `client_id` or `connect_key` | bad invocation |
 | `Unauthenticated` | unknown connect_key — it will never become valid | **fatal — the client exits instead of retrying forever** |
 | `PermissionDenied` | the key owner's email is not verified | fatal |
-| `AlreadyExists` | the same `connection_id` is already active | retried; a half-open ghost registration is cleared by server-side keepalive in ~80 s |
 | `ResourceExhausted` | the user hit `MAX_CONNECTIONS` (default 5) | retried |
 | `Internal` | e.g. the DB is down | retried — transient |
+
+There is no `AlreadyExists` lockout: a reconnect with the same `client_id` while the
+stale registration is still active **replaces** it — the old stream is closed, its
+undelivered (still-queued) tasks are failed with `connection lost`, and tasks already
+delivered to the old stream keep waiting (the reconnecting client delivers their results
+from its local outbox). The replaced registration does not count toward `MAX_CONNECTIONS`,
+so a reconnecting machine is never blocked by its own ghost slot. Server-side keepalive
+still closes half-open streams in ~80 s so the stale handler exits instead of lingering
+until the ~15-minute TCP timeout.
 
 `connect_key` itself: 10 characters from the 31-char visually-unambiguous alphabet
 `23456789abcdefghjkmnpqrstuvwxyz` (no `0/O`, `1/l/I` pairs), rejection-sampled for a
