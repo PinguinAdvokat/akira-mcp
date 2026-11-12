@@ -717,7 +717,9 @@
     var row = el("div", { class: "connect-command" });
     var line = el("code", { class: "copy-line" });
     line.appendChild(document.createTextNode("bash <(curl -sL " + publicOrigin() + "/sh) "));
-    line.appendChild(el("span", { class: "key", text: me.connect_key || "—" }));
+    // Пробел перед ключом — внутри span: .copy-line это flex, и конечный
+    // пробел анонимного текстового flex-элемента схлопывается.
+    line.appendChild(el("span", { class: "key", text: " " + (me.connect_key || "—") }));
     line.title = "Нажмите, чтобы скопировать";
     line.addEventListener("click", function () { copyText(cmd, "Команда скопирована"); });
     row.appendChild(line);
